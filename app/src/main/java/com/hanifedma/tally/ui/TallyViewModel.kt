@@ -2,6 +2,7 @@ package com.hanifedma.tally.ui
 
 import android.app.Application
 import android.content.Context
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.hanifedma.tally.auth.AuthManager
@@ -9,6 +10,7 @@ import com.hanifedma.tally.core.Dates
 import com.hanifedma.tally.core.Ledger
 import com.hanifedma.tally.core.SettingsRow
 import com.hanifedma.tally.data.LedgerRepository
+import com.hanifedma.tally.data.LocalStore
 import com.hanifedma.tally.data.Prefs
 import com.hanifedma.tally.data.Supabase
 import com.hanifedma.tally.i18n.Strings
@@ -32,6 +34,11 @@ class TallyViewModel(app: Application) : AndroidViewModel(app) {
     data class UiState(
         val booting: Boolean = true,
         val signedIn: Boolean = false,
+        /** True when this ledger lives on this device and goes nowhere else. */
+        val local: Boolean = false,
+        /** Transactions waiting on this device, when signing in could take them. */
+        val offerMigration: Int = 0,
+        val migrating: Boolean = false,
         val account: AuthManager.Account? = null,
         val tab: Tab = Tab.LOG,
         /** Any day inside the period being shown. */
@@ -64,12 +71,16 @@ class TallyViewModel(app: Application) : AndroidViewModel(app) {
 
     private var repo: LedgerRepository? = null
 
+    /** True once a ledger is open, whichever way in was taken. */
+    private val active: Boolean
+        get() = _ui.value.signedIn || _ui.value.local
+
     /** The theme actually in force. */
     val theme: String
-        get() = if (_ui.value.signedIn) _ledger.value.settings.theme else _localTheme.value
+        get() = if (active) _ledger.value.settings.theme else _localTheme.value
 
     val lang: String
-        get() = if (_ui.value.signedIn) _ledger.value.settings.lang else _localLang.value
+        get() = if (active) _ledger.value.settings.lang else _localLang.value
 
     val isDark: Boolean get() = theme != "light"
 
@@ -80,11 +91,112 @@ class TallyViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             _localTheme.value = prefs.theme.first()
             _localLang.value = prefs.lang.first()
+
+            // Someone who chose to work without an account is not asked again
+            // every morning, and never waits on a network they said they did
+            // not want.
+            if (prefs.mode.first() == "local") {
+                startLocal()
+                return@launch
+            }
             if (!Supabase.isConfigured) {
                 _ui.value = _ui.value.copy(booting = false)
                 return@launch
             }
             auth.accounts().collect { account -> onAccount(account) }
+        }
+    }
+
+    // ------------------------------------------------------------
+    //  Without an account
+    // ------------------------------------------------------------
+
+    /**
+     * Work on this device only: the same ledger and the same rules, with
+     * every path to the network closed.
+     */
+    fun useLocal() {
+        viewModelScope.launch {
+            prefs.setMode("local")
+            startLocal()
+        }
+    }
+
+    private fun startLocal() {
+        val repository = LedgerRepository(
+            getApplication<Application>(),
+            LedgerRepository.LOCAL_UID,
+            viewModelScope,
+            local = true,
+            // Carry whatever was chosen on the way in, so a first-run ledger
+            // is seeded in the right language and painted in the right theme.
+            // Only used if this device has no ledger yet — writing it here
+            // would save an empty cache over a real one.
+            defaults = SettingsRow(theme = _localTheme.value, lang = _localLang.value),
+        )
+        attach(repository)
+        _ui.value = _ui.value.copy(
+            booting = false,
+            signedIn = false,
+            local = true,
+            account = null,
+            signingIn = false,
+            anchor = Dates.today(),
+        )
+    }
+
+    /**
+     * Leave device-only mode for a real account. The device ledger is left
+     * exactly where it is — signing in offers to copy it, and refusing that
+     * offer must not be the same as throwing it away.
+     */
+    fun leaveLocal() {
+        viewModelScope.launch {
+            prefs.setMode("cloud")
+            repo?.close()
+            repo = null
+            _ledger.value = Ledger()
+            _ui.value = _ui.value.copy(local = false, signedIn = false, account = null)
+            if (Supabase.isConfigured) {
+                auth.accounts().collect { account -> onAccount(account) }
+            }
+        }
+    }
+
+    /** Throw away the device-only ledger and start again, still local. */
+    fun eraseLocal() {
+        viewModelScope.launch {
+            repo?.forgetDevice()
+            repo?.close()
+            repo = null
+            _ledger.value = Ledger()
+            startLocal()
+            showMessage("local.erased")
+        }
+    }
+
+    fun dismissMigration() {
+        val uid = _ui.value.account?.id
+        _ui.value = _ui.value.copy(offerMigration = 0)
+        if (uid != null) viewModelScope.launch { prefs.rememberMigrated(uid) }
+    }
+
+    /** Copy the device-only ledger into the account just signed into. */
+    fun acceptMigration() {
+        val uid = _ui.value.account?.id ?: return
+        val repository = repo ?: return
+        _ui.value = _ui.value.copy(migrating = true)
+        viewModelScope.launch {
+            try {
+                val cache = LocalStore(getApplication(), LedgerRepository.LOCAL_UID).readCache()
+                if (cache != null) repository.importLocal(cache)
+                prefs.rememberMigrated(uid)
+                showMessage("migrate.done")
+            } catch (e: Exception) {
+                Log.w("TallyViewModel", "Couldn't copy the device ledger", e)
+                showMessage("migrate.failed", isError = true)
+            }
+            _ui.value = _ui.value.copy(migrating = false, offerMigration = 0)
         }
     }
 
@@ -107,14 +219,26 @@ class TallyViewModel(app: Application) : AndroidViewModel(app) {
         }
 
         val repository = LedgerRepository(getApplication<Application>(), account.id, viewModelScope)
-        repo = repository
         _ui.value = _ui.value.copy(
             booting = false,
             signedIn = true,
+            local = false,
             account = account,
             signingIn = false,
             anchor = Dates.today(),
         )
+        attach(repository)
+        offerMigrationIfAny(account.id)
+    }
+
+    /**
+     * Point the screens at a ledger. The only difference between a signed-in
+     * one and a device-only one is how it was built — everything from here
+     * on is the same either way.
+     */
+    private fun attach(repository: LedgerRepository) {
+        repo?.close()
+        repo = repository
         viewModelScope.launch {
             repository.ledger.collect { ledger ->
                 _ledger.value = ledger
@@ -140,6 +264,20 @@ class TallyViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         repository.start()
+    }
+
+    /**
+     * Is there device-only data worth offering to copy into this account?
+     * Asked once per account: someone who said "start fresh" is not asked
+     * again every time they open the app.
+     */
+    private fun offerMigrationIfAny(uid: String) {
+        viewModelScope.launch {
+            if (uid in prefs.migrated.first()) return@launch
+            val cache = LocalStore(getApplication(), LedgerRepository.LOCAL_UID).readCache()
+            val n = cache?.transactions?.count { it.deletedAt == null } ?: 0
+            if (n > 0) _ui.value = _ui.value.copy(offerMigration = n)
+        }
     }
 
     // ------------------------------------------------------------
@@ -194,7 +332,7 @@ class TallyViewModel(app: Application) : AndroidViewModel(app) {
 
     fun toggleTheme() {
         val next = if (isDark) "light" else "dark"
-        if (_ui.value.signedIn) {
+        if (active) {
             writeSettings(_ledger.value.settings.copy(theme = next))
         } else {
             _localTheme.value = next
@@ -204,7 +342,7 @@ class TallyViewModel(app: Application) : AndroidViewModel(app) {
 
     fun toggleLang() {
         val next = if (lang == "ko") "en" else "ko"
-        if (_ui.value.signedIn) {
+        if (active) {
             writeSettings(_ledger.value.settings.copy(lang = next))
         } else {
             _localLang.value = next

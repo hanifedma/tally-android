@@ -98,6 +98,22 @@ fun LoginScreen(vm: TallyViewModel, fmt: Fmt, signingIn: Boolean, dark: Boolean)
             )
         }
 
+        // Signing in is the better way to use Tally, not the only one. A
+        // phone with no Play Services cannot reach the button above at all,
+        // and this is the way in that always works.
+        Spacer(Modifier.height(20.dp))
+        OrRule(fmt.t("login.or"))
+        Spacer(Modifier.height(14.dp))
+        GhostButton(fmt.t("login.local")) { vm.useLocal() }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            fmt.t("login.localSub"),
+            style = MaterialTheme.typography.labelMedium,
+            color = c.faint,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.widthIn(max = 340.dp),
+        )
+
         Spacer(Modifier.height(34.dp))
         Feature("⚡", fmt.t("login.f1"), fmt.t("login.f1sub"))
         Feature("💱", fmt.t("login.f2"), fmt.t("login.f2sub"))
@@ -185,6 +201,42 @@ private fun GoogleMark() {
             start = androidx.compose.ui.geometry.Offset(w * 0.52f, size.height * 0.5f),
             end = androidx.compose.ui.geometry.Offset(w * 0.94f, size.height * 0.5f),
             strokeWidth = stroke,
+        )
+    }
+}
+
+/** A rule with the word centred in the gap. */
+@Composable
+private fun OrRule(label: String) {
+    val c = LocalTallyColors.current
+    Row(
+        Modifier.fillMaxWidth().widthIn(max = 340.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Box(Modifier.weight(1f).height(1.dp).background(c.border))
+        Text(label, style = MaterialTheme.typography.labelMedium, color = c.faint)
+        Box(Modifier.weight(1f).height(1.dp).background(c.border))
+    }
+}
+
+@Composable
+private fun GhostButton(label: String, onClick: () -> Unit) {
+    val c = LocalTallyColors.current
+    Box(
+        Modifier
+            .widthIn(min = 240.dp)
+            .clip(RoundedCornerShape(999.dp))
+            .border(1.dp, c.border, RoundedCornerShape(999.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 24.dp, vertical = 13.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = c.text,
         )
     }
 }

@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -28,6 +29,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -127,10 +129,6 @@ fun TallyApp(vm: TallyViewModel) {
             vm.clearMessage()
         }
 
-        if (!Supabase.isConfigured) {
-            SetupScreen(fmt)
-            return@TallyTheme
-        }
         if (ui.booting) {
             Box(Modifier.fillMaxSize().background(c.bg), contentAlignment = Alignment.Center) {
                 Image(
@@ -141,9 +139,44 @@ fun TallyApp(vm: TallyViewModel) {
             }
             return@TallyTheme
         }
-        if (!ui.signedIn) {
-            LoginScreen(vm, fmt, ui.signingIn, vm.isDark)
+        // A ledger on this device needs neither a project nor an account, so
+        // neither screen below is a dead end any more.
+        if (!ui.signedIn && !ui.local) {
+            if (!Supabase.isConfigured) SetupScreen(fmt, onUseLocal = { vm.useLocal() })
+            else LoginScreen(vm, fmt, ui.signingIn, vm.isDark)
             return@TallyTheme
+        }
+
+        // Signing in after working on the device alone: offer to bring that
+        // ledger along, once per account, and never without being asked.
+        if (ui.offerMigration > 0) {
+            AlertDialog(
+                onDismissRequest = { vm.dismissMigration() },
+                containerColor = c.surface,
+                title = { Text(fmt.t("migrate.title"), color = c.text) },
+                text = {
+                    Text(
+                        fmt.t(
+                            "migrate.body",
+                            mapOf("n" to fmt.t("migrate.count", mapOf("n" to ui.offerMigration))),
+                        ),
+                        color = c.muted,
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = { vm.acceptMigration() }, enabled = !ui.migrating) {
+                        Text(
+                            if (ui.migrating) fmt.t("migrate.working") else fmt.t("migrate.yes"),
+                            color = c.accent,
+                        )
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { vm.dismissMigration() }, enabled = !ui.migrating) {
+                        Text(fmt.t("migrate.no"), color = c.muted)
+                    }
+                },
+            )
         }
 
         val period = vm.period()
@@ -413,6 +446,16 @@ private fun SheetContent(
             ledger = ledger,
             fmt = fmt,
             email = email,
+            local = vm.ui.value.local,
+            canSignIn = Supabase.isConfigured,
+            onSignIn = {
+                onCloseAll()
+                vm.leaveLocal()
+            },
+            onErase = {
+                onCloseAll()
+                vm.eraseLocal()
+            },
             onSettings = { vm.writeSettings(it) },
             onManageCategories = { onPush(Sheet.ManageCategories("expense")) },
             onManageAccounts = {
@@ -516,6 +559,9 @@ private fun SyncChip(fmt: Fmt, sync: LedgerRepository.Sync) {
     val c = LocalTallyColors.current
     if (sync.status == LedgerRepository.Status.LIVE && sync.pending == 0) return
     val (label, dot) = when {
+        // Not a problem to fix, so it does not read like one — but it is the
+        // one fact about this ledger nobody should be surprised by.
+        sync.status == LedgerRepository.Status.LOCAL -> fmt.t("local.status") to c.faint
         sync.status == LedgerRepository.Status.OFFLINE -> fmt.t("sync.offline") to c.faint
         sync.status == LedgerRepository.Status.ERROR -> fmt.t("sync.reconnecting") to c.danger
         sync.pending > 0 -> fmt.t("sync.pending", mapOf("n" to sync.pending)) to c.warn
@@ -638,7 +684,7 @@ private fun SummaryCell(
 
 /** Shown when supabase.properties is still holding its placeholders. */
 @Composable
-private fun SetupScreen(fmt: Fmt) {
+private fun SetupScreen(fmt: Fmt, onUseLocal: () -> Unit) {
     val c = LocalTallyColors.current
     Column(
         Modifier.fillMaxSize().background(c.bg).padding(28.dp),
@@ -660,6 +706,34 @@ private fun SetupScreen(fmt: Fmt) {
         if (!Supabase.hasUrl) MissingRow(fmt.t("setup.missingUrl"))
         if (!Supabase.hasKey) MissingRow(fmt.t("setup.missingKey"))
         if (!Supabase.hasGoogleClientId) MissingRow(fmt.t("setup.missingClient"))
+
+        // None of the above is needed to keep a ledger on this phone, so this
+        // is a place to start rather than only a place to wait.
+        Spacer(Modifier.height(20.dp))
+        PrimaryButton(fmt.t("setup.tryLocal"), onClick = onUseLocal)
+        Spacer(Modifier.height(10.dp))
+        Help(fmt.t("setup.tryLocalHelp"))
+    }
+}
+
+/** A filled button in the accent, used where there is one obvious action. */
+@Composable
+private fun PrimaryButton(label: String, onClick: () -> Unit) {
+    val c = LocalTallyColors.current
+    Box(
+        Modifier
+            .clip(RoundedCornerShape(14.dp))
+            .background(c.accent)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 24.dp, vertical = 13.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = c.accentContrast,
+        )
     }
 }
 

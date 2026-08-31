@@ -45,6 +45,12 @@ fun SettingsSheet(
     ledger: Ledger,
     fmt: Fmt,
     email: String?,
+    /** True when this ledger is on this device only. */
+    local: Boolean,
+    /** False when there is no project configured to sign in to. */
+    canSignIn: Boolean,
+    onSignIn: () -> Unit,
+    onErase: () -> Unit,
     onSettings: (SettingsRow) -> Unit,
     onManageCategories: () -> Unit,
     onManageAccounts: () -> Unit,
@@ -110,12 +116,24 @@ fun SettingsSheet(
             Spacer(Modifier.height(8.dp))
             LinkRow("📄", fmt.t("set.export"), fmt.t("set.exportHelp"), onExport)
 
-            Section(fmt.t("set.account"))
-            if (email != null) {
-                Help(fmt.t("set.signedInAs", mapOf("email" to email)))
+            if (local) {
+                Section(fmt.t("local.title"))
+                Help(fmt.t("local.help"))
+                if (canSignIn) {
+                    Spacer(Modifier.height(12.dp))
+                    GhostButton(fmt.t("local.signIn"), Modifier.fillMaxWidth(), onClick = onSignIn)
+                    Help(fmt.t("local.signInHelp"), Modifier.padding(top = 6.dp))
+                }
                 Spacer(Modifier.height(10.dp))
+                GhostButton(fmt.t("local.erase"), Modifier.fillMaxWidth(), onClick = onErase)
+            } else {
+                Section(fmt.t("set.account"))
+                if (email != null) {
+                    Help(fmt.t("set.signedInAs", mapOf("email" to email)))
+                    Spacer(Modifier.height(10.dp))
+                }
+                GhostButton(fmt.t("signout"), Modifier.fillMaxWidth(), onClick = onSignOut)
             }
-            GhostButton(fmt.t("signout"), Modifier.fillMaxWidth(), onClick = onSignOut)
 
             Spacer(Modifier.height(20.dp))
             Text(

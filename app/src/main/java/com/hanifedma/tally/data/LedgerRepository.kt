@@ -55,13 +55,27 @@ class LedgerRepository(
     context: Context,
     private val uid: String,
     private val scope: CoroutineScope,
+    /**
+     * Keep everything on this device: the same ledger and the same rules,
+     * with every path to the network closed. The cache below stops being an
+     * optimisation and becomes the ledger itself, which is why nothing is
+     * ever queued in local mode — an outbox that could never drain would be
+     * the only thing holding the row.
+     */
+    private val local: Boolean = false,
+    /**
+     * Theme and language to start from when this ledger has no settings of
+     * its own yet — what was chosen on the way in, so that choice survives
+     * the first sync rather than being overwritten by the defaults.
+     */
+    private val defaults: SettingsRow? = null,
 ) {
 
-    enum class Status { OFFLINE, SYNCING, LIVE, ERROR }
+    enum class Status { OFFLINE, SYNCING, LIVE, ERROR, LOCAL }
 
     data class Sync(val status: Status = Status.SYNCING, val pending: Int = 0)
 
-    private val local = LocalStore(context, uid)
+    private val store = LocalStore(context, uid)
     private val client get() = Supabase.client()
 
     private val _ledger = MutableStateFlow(Ledger())
@@ -135,7 +149,8 @@ class LedgerRepository(
             val full = stampUser(normalize(row))
             val id = idOf(full)
             rows[id] = full
-            pending[id] = full
+            // Nothing to send it to, so nothing waits to be sent.
+            if (!local) pending[id] = full
         }
 
         /** Everything that changed since last time. Returns true if anything did. */
@@ -279,7 +294,7 @@ class LedgerRepository(
     )
     private val tables: List<Table<*>> = listOf(accounts, categories, transactions, budgets)
 
-    private var settings = SettingsRow()
+    private var settings = defaults ?: SettingsRow()
     private var settingsPending: SettingsRow? = null
     private var haveSettings = false
 
@@ -309,7 +324,13 @@ class LedgerRepository(
     private fun pendingCount() =
         tables.sumOf { it.pending.size } + (if (settingsPending != null) 1 else 0)
 
-    private fun setStatus(status: Status) { _sync.value = Sync(status, pendingCount()) }
+    /**
+     * With no network there is nothing to be behind, so there is only one
+     * honest thing the status line can say.
+     */
+    private fun setStatus(status: Status) {
+        _sync.value = Sync(if (local) Status.LOCAL else status, pendingCount())
+    }
 
     // ------------------------------------------------------------
     //  Starting up
@@ -318,6 +339,14 @@ class LedgerRepository(
     fun start() {
         loadCache()
         publish()
+        if (local) {
+            // No fetch to wait for and no socket to open. Give a first-run
+            // ledger its starting categories and accounts; that is all.
+            ensureSeeded()
+            setStatus(Status.LOCAL)
+            publish()
+            return
+        }
         setStatus(Status.SYNCING)
         scope.launch {
             try {
@@ -331,7 +360,7 @@ class LedgerRepository(
     }
 
     private fun loadCache() {
-        val cache = local.readCache() ?: return
+        val cache = store.readCache() ?: return
         cache.settings?.let { settings = it.normalized(); haveSettings = true }
         for (table in tables) table.cursor = cache.cursors[table.name]
         accounts.loadCached(cache.accounts)
@@ -339,7 +368,7 @@ class LedgerRepository(
         transactions.loadCached(cache.transactions)
         budgets.loadCached(cache.budgets)
 
-        val outbox = local.readOutbox()
+        val outbox = store.readOutbox()
         outbox.accounts.forEach { accounts.pending[it.id] = it }
         outbox.categories.forEach { categories.pending[it.id] = it }
         outbox.transactions.forEach { transactions.pending[it.id] = it }
@@ -348,7 +377,7 @@ class LedgerRepository(
     }
 
     private fun saveCache() {
-        local.writeCache(
+        store.writeCache(
             LocalStore.Cache(
                 cursors = tables.associate { it.name to it.cursor },
                 settings = if (haveSettings) settings else null,
@@ -361,7 +390,8 @@ class LedgerRepository(
     }
 
     private fun saveOutbox() {
-        local.writeOutbox(
+        if (local) return
+        store.writeOutbox(
             LocalStore.Outbox(
                 accounts = accounts.pending.values.toList(),
                 categories = categories.pending.values.toList(),
@@ -384,7 +414,7 @@ class LedgerRepository(
     // ------------------------------------------------------------
 
     private suspend fun syncNow() {
-        if (closed) return
+        if (closed || local) return
         setStatus(Status.SYNCING)
         var changed = false
 
@@ -417,7 +447,7 @@ class LedgerRepository(
 
     /** Called on resume, and after a reconnection. */
     fun refresh() {
-        if (closed) return
+        if (closed || local) return
         scope.launch {
             try {
                 syncNow()
@@ -433,7 +463,7 @@ class LedgerRepository(
     // ------------------------------------------------------------
 
     private fun subscribe() {
-        if (closed || channel != null) return
+        if (closed || local || channel != null) return
         val ch = client.channel("tally:$uid")
         channel = ch
 
@@ -490,7 +520,7 @@ class LedgerRepository(
     }
 
     private fun scheduleRetry() {
-        if (closed || retryJob?.isActive == true) return
+        if (closed || local || retryJob?.isActive == true) return
         val wait = retryDelayMs
         // Back off, but never so far that a reconnection feels like a hang.
         retryDelayMs = (retryDelayMs * 2).coerceAtMost(30_000L)
@@ -540,7 +570,7 @@ class LedgerRepository(
     private fun enqueueSettings(next: SettingsRow) {
         settings = next.normalized()
         haveSettings = true
-        settingsPending = settings.copy(userId = uid, updatedAt = null)
+        if (!local) settingsPending = settings.copy(userId = uid, updatedAt = null)
         saveCache()
         saveOutbox()
         publish()
@@ -565,7 +595,7 @@ class LedgerRepository(
     fun restore(row: TransactionRow) = put(row.copy(deletedAt = null))
 
     fun flush() {
-        if (closed) return
+        if (closed || local) return
         scope.launch { flushNow() }
     }
 
@@ -670,6 +700,72 @@ class LedgerRepository(
     }
 
     // ------------------------------------------------------------
+    //  Bringing a device-only ledger into an account
+    // ------------------------------------------------------------
+
+    /**
+     * Copy a device-only ledger into this signed-in one.
+     *
+     * The rows keep their own ids — they were made on the device and are
+     * already unique — with one exception. The starter categories and
+     * accounts have ids *derived* from the user id, so that two devices
+     * seeding the same new account write one set of rows rather than two.
+     * Carried across unchanged they would arrive as strangers beside this
+     * account's own copy of the same sixteen categories, so those ids, and
+     * every reference to them, are translated to what this account would
+     * have derived for itself.
+     *
+     * Queued like any other write: if the network is not there, it goes when
+     * it is. Nothing is erased at the far end, so a failure here loses
+     * nothing.
+     */
+    fun importLocal(cache: LocalStore.Cache) {
+        val map = HashMap<String, String>()
+        for (seed in SEED_CATEGORIES) {
+            map[Ids.derived(LOCAL_UID, "category:${seed.slug}")] =
+                Ids.derived(uid, "category:${seed.slug}")
+        }
+        for (seed in SEED_ACCOUNTS) {
+            map[Ids.derived(LOCAL_UID, "account:${seed.slug}")] =
+                Ids.derived(uid, "account:${seed.slug}")
+        }
+        fun remap(value: String?): String? = value?.let { map[it] ?: it }
+
+        for (row in cache.accounts.filter { it.deletedAt == null }) {
+            accounts.enqueue(row.copy(id = remap(row.id)!!, userId = uid, updatedAt = null))
+        }
+        for (row in cache.categories.filter { it.deletedAt == null }) {
+            categories.enqueue(row.copy(id = remap(row.id)!!, userId = uid, updatedAt = null))
+        }
+        for (row in cache.transactions.filter { it.deletedAt == null }) {
+            transactions.enqueue(
+                row.copy(
+                    id = remap(row.id)!!,
+                    userId = uid,
+                    updatedAt = null,
+                    accountId = remap(row.accountId),
+                    toAccountId = remap(row.toAccountId),
+                    categoryId = remap(row.categoryId),
+                )
+            )
+        }
+        for (row in cache.budgets.filter { it.deletedAt == null }) {
+            budgets.enqueue(
+                row.copy(
+                    id = remap(row.id)!!,
+                    userId = uid,
+                    updatedAt = null,
+                    categoryId = remap(row.categoryId),
+                )
+            )
+        }
+        saveCache()
+        saveOutbox()
+        publish()
+        flush()
+    }
+
+    // ------------------------------------------------------------
     //  Lifecycle
     // ------------------------------------------------------------
 
@@ -682,10 +778,13 @@ class LedgerRepository(
     }
 
     /** Sign-out: a shared phone should not keep the ledger. */
-    fun forgetDevice() = local.forget()
+    fun forgetDevice() = store.forget()
 
-    private companion object {
-        const val TAG = "TallyLedger"
-        const val PAGE = 1000L
+    companion object {
+        /** The user id a device-only ledger is filed under, here and on the web. */
+        const val LOCAL_UID = "local"
+
+        private const val TAG = "TallyLedger"
+        private const val PAGE = 1000L
     }
 }
