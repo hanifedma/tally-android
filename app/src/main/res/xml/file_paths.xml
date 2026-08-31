@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Only the one folder an export is written to. A FileProvider that shares
+     more than it needs to is a way to hand someone else the whole ledger. -->
+<paths>
+    <cache-path name="export" path="export/" />
+</paths>

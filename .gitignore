@@ -1,0 +1,30 @@
+# ---------------------------------------------------------------- build output
+build/
+/captures
+.externalNativeBuild
+.cxx
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# ------------------------------------------------------------------ Gradle/IDE
+.gradle/
+.kotlin/
+*.iml
+.idea/
+
+# Machine-specific: records wherever the Android SDK happens to live.
+local.properties
+
+# --------------------------------------------------------------------- signing
+# Never commit a signing key. Whoever holds it can publish an update that
+# Android accepts as genuinely yours.
+*.jks
+*.keystore
+keystore.properties
+signing.properties
+
+# ------------------------------------------------------------------------ misc
+.DS_Store
+*.log

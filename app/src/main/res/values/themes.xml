@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- The launch theme. Compose draws everything after the first frame; this
+         only has to make the splash match what appears next, so the app never
+         flashes a differently-coloured window on start. -->
+    <style name="Theme.Tally" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/tally_bg</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_splash</item>
+        <item name="postSplashScreenTheme">@style/Theme.Tally.Main</item>
+    </style>
+
+    <style name="Theme.Tally.Main" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/tally_bg</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:windowLayoutInDisplayCutoutMode" tools:targetApi="o_mr1">shortEdges</item>
+    </style>
+</resources>

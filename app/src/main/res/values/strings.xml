@@ -1,0 +1,6 @@
+<resources>
+    <!-- The launcher label only. Everything inside the app is translated in
+         i18n/Strings.kt instead, because the language is an in-app setting
+         that has to match the web app rather than follow the system. -->
+    <string name="app_name">Tally</string>
+</resources>

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The cloud is the source of truth, so nothing here needs backing up: a
+     restored device signs in and re-downloads. The local cache is excluded
+     explicitly so a restore can never resurrect a stale ledger. -->
+<full-backup-content>
+    <exclude domain="file" path="tally-cache.json" />
+    <exclude domain="file" path="datastore/" />
+</full-backup-content>

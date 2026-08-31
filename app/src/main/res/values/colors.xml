@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Only what the launch window needs; the app's palette lives in
+         ui/theme/Color.kt. -->
+    <color name="tally_bg">#FF0F0F10</color>
+</resources>
