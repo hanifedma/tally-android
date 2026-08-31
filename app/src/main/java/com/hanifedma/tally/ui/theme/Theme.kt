@@ -1,17 +1,21 @@
 package com.hanifedma.tally.ui.theme
 
+import android.app.Activity
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.unit.sp
+import androidx.core.view.WindowCompat
 
 /**
  * Tally's theme.
@@ -23,7 +27,22 @@ import androidx.compose.ui.unit.sp
  * the browser is doing.
  */
 
-val LocalTallyColors = staticCompositionLocalOf { DarkColors }
+/**
+ * Not `staticCompositionLocalOf`.
+ *
+ * The static kind does not track who reads it: it is for values that are
+ * fixed for the life of a composition, and it buys its speed by not
+ * invalidating readers when the value changes. Tally's palette is not fixed —
+ * it changes every time someone switches theme, and (more quietly) once at
+ * every cold start, when the ledger loads a moment after the first frame and
+ * says "light".
+ *
+ * With the static kind that produced a genuinely confusing bug: the theme
+ * *value* propagated perfectly — the toggle's own icon flipped to a moon —
+ * while every colour on the screen stayed dark, because nothing that read
+ * `.current` had been told to look again.
+ */
+val LocalTallyColors = compositionLocalOf { DarkColors }
 
 private fun scheme(c: TallyColors, dark: Boolean) = if (dark) {
     darkColorScheme(
@@ -115,6 +134,22 @@ fun TallyTheme(
     content: @Composable () -> Unit,
 ) {
     val colors = if (dark) DarkColors else LightColors
+
+    // The app draws behind the system bars, so their icons are the app's
+    // problem. Set once at startup they would be right exactly half the
+    // time: switching to light left a white clock on a white header, which
+    // is not a small thing when it is the only clock on the screen.
+    val view = LocalView.current
+    if (!view.isInEditMode) {
+        SideEffect {
+            val window = (view.context as? Activity)?.window ?: return@SideEffect
+            WindowCompat.getInsetsController(window, view).apply {
+                isAppearanceLightStatusBars = !dark
+                isAppearanceLightNavigationBars = !dark
+            }
+        }
+    }
+
     CompositionLocalProvider(LocalTallyColors provides colors) {
         MaterialTheme(
             colorScheme = scheme(colors, dark),

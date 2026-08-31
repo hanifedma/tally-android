@@ -60,7 +60,7 @@ fun LoginScreen(vm: TallyViewModel, fmt: Fmt, signingIn: Boolean, dark: Boolean)
     ) {
         Spacer(Modifier.height(24.dp))
         Image(
-            painter = painterResource(R.mipmap.ic_launcher),
+            painter = painterResource(R.drawable.ic_tally_mark),
             contentDescription = null,
             modifier = Modifier.size(72.dp).clip(RoundedCornerShape(21.dp)),
         )

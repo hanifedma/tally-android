@@ -8,7 +8,7 @@ package com.hanifedma.tally.i18n
 //  Change the wording there and run the generator; StringsParityTest fails
 //  if this file falls behind.
 //
-//  266 keys, 2 languages.
+//  267 keys, 2 languages.
 // ============================================================
 
 object Strings {
@@ -53,7 +53,7 @@ object Strings {
         "signout.body" to "Your ledger stays in the cloud. Signing back in brings it all back.",
         "local.status" to "On this device",
         "local.title" to "This device only",
-        "local.help" to "Your ledger is saved here and sent nowhere. Sign in to sync it with your phone and keep a copy you cannot lose with the device.",
+        "local.help" to "Your ledger is saved here and sent nowhere. Sign in to sync it with your other devices and keep a copy that outlives this one.",
         "local.signIn" to "Sign in to sync",
         "local.signInHelp" to "Keeps everything you have entered.",
         "local.erase" to "Erase everything on this device",
@@ -77,7 +77,7 @@ object Strings {
         "setup.missingKey" to "Missing: the anon key",
         "setup.missingClient" to "Missing: the Google client id",
         "setup.tryLocal" to "Use it on this device only",
-        "setup.tryLocalHelp" to "Nothing to set up. Everything is saved in this browser, and you can sign in later without losing it.",
+        "setup.tryLocalHelp" to "Nothing to set up. Everything is saved on this device, and you can sign in later without losing it.",
         "sum.income" to "Income",
         "sum.expenses" to "Expenses",
         "sum.net" to "Net",
@@ -187,6 +187,7 @@ object Strings {
         "tx.sameAccount" to "Pick two different accounts",
         "tx.calcBad" to "That is not a number Tally can read",
         "tx.calcHint" to "You can type a sum: 12000+3400",
+        "tx.calcEquals" to "= {amount}",
         "tx.suggestions" to "Recent notes",
         "tx.noAccounts" to "Add an account first — money has to come from somewhere.",
         "tx.noCategories" to "No categories yet. Add one in Settings.",
@@ -322,7 +323,7 @@ object Strings {
         "signout.body" to "장부는 클라우드에 그대로 있습니다. 다시 로그인하면 모두 돌아옵니다.",
         "local.status" to "이 기기에만",
         "local.title" to "이 기기에만 저장",
-        "local.help" to "장부가 이 기기에만 저장되고 아무 곳에도 전송되지 않습니다. 로그인하면 휴대폰과 동기화되고, 기기를 잃어버려도 사라지지 않습니다.",
+        "local.help" to "장부가 이 기기에만 저장되고 아무 곳에도 전송되지 않습니다. 로그인하면 다른 기기와 동기화되고, 이 기기를 잃어버려도 사라지지 않습니다.",
         "local.signIn" to "로그인하고 동기화",
         "local.signInHelp" to "지금까지 입력한 내용은 그대로 유지됩니다.",
         "local.erase" to "이 기기의 모든 내용 지우기",
@@ -346,7 +347,7 @@ object Strings {
         "setup.missingKey" to "누락됨: anon 키",
         "setup.missingClient" to "누락됨: Google 클라이언트 ID",
         "setup.tryLocal" to "이 기기에서만 사용하기",
-        "setup.tryLocalHelp" to "따로 설정할 것이 없습니다. 모든 내용이 이 브라우저에 저장되고, 나중에 로그인해도 그대로 남습니다.",
+        "setup.tryLocalHelp" to "따로 설정할 것이 없습니다. 모든 내용이 이 기기에 저장되고, 나중에 로그인해도 그대로 남습니다.",
         "sum.income" to "수입",
         "sum.expenses" to "지출",
         "sum.net" to "합계",
@@ -456,6 +457,7 @@ object Strings {
         "tx.sameAccount" to "서로 다른 자산을 선택하세요",
         "tx.calcBad" to "읽을 수 없는 숫자입니다",
         "tx.calcHint" to "계산식도 됩니다: 12000+3400",
+        "tx.calcEquals" to "= {amount}",
         "tx.suggestions" to "최근 메모",
         "tx.noAccounts" to "먼저 자산을 추가하세요. 돈은 어딘가에서 나와야 합니다.",
         "tx.noCategories" to "카테고리가 없습니다. 설정에서 추가하세요.",

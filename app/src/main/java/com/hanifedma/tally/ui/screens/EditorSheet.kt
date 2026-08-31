@@ -31,12 +31,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.hanifedma.tally.core.Calc
 import com.hanifedma.tally.core.Dates
 import com.hanifedma.tally.core.Ids
 import com.hanifedma.tally.core.Ledger
@@ -139,6 +142,12 @@ fun EditorSheet(
     var showTime by remember { mutableStateOf(false) }
     var showSuggestions by remember { mutableStateOf(false) }
 
+    // The amount field owns its own caret: the operator buttons append to it
+    // and have to be able to put the cursor after what they inserted.
+    var amountField by remember {
+        mutableStateOf(TextFieldValue(draft.amount, TextRange(draft.amount.length)))
+    }
+
     val ctx = ledger.ctx
     val account = ledger.account(draft.accountId)
     val toAccount = ledger.account(draft.toAccountId)
@@ -169,6 +178,7 @@ fun EditorSheet(
                 occurredMin = Dates.minuteOfDay(),
                 createdAt = null,
             )
+            amountField = TextFieldValue("")
         }
     }
 
@@ -213,42 +223,71 @@ fun EditorSheet(
 
             // ---- amount ----
             AmountField(
-                value = draft.amount,
+                value = amountField,
                 currency = currency,
                 kindColour = when (draft.kind) {
                     "income" -> c.income
                     "transfer" -> c.transfer
                     else -> c.expense
                 },
-                onChange = { draft = draft.copy(amount = it); error = null },
+                onChange = {
+                    amountField = it
+                    draft = draft.copy(amount = it.text)
+                    error = null
+                },
             )
             Spacer(Modifier.height(8.dp))
             OperatorRow { op ->
-                draft = draft.copy(amount = draft.amount + op)
+                // Move the caret past what was just inserted. A plain string
+                // field leaves it at the offset it already had, which puts it
+                // to the *left* of the operator you pressed — so the next
+                // digit lands on the wrong side of it.
+                val next = amountField.text + op
+                amountField = TextFieldValue(next, TextRange(next.length))
+                draft = draft.copy(amount = next)
                 error = null
             }
             Spacer(Modifier.height(8.dp))
 
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                val unreadable = draft.amount.isNotBlank() && minor == null
+                val rateUnknown = minor != null && minor != 0L && currency != ctx.main &&
+                    Money.rateMissing(currency, ctx.main, ctx.rates)
+                // Someone typing a sum should see the answer while they type,
+                // not have to save the transaction to find out what it is.
+                val showsTotal = minor != null && minor != 0L && Calc.isExpression(draft.amount)
+
                 val hint = when {
-                    draft.amount.isNotBlank() && minor == null -> fmt.t("tx.calcBad")
+                    unreadable -> fmt.t("tx.calcBad")
                     minor == null || minor == 0L -> fmt.t("tx.calcHint")
-                    currency == ctx.main -> ""
-                    Money.rateMissing(currency, ctx.main, ctx.rates) ->
-                        fmt.t("tx.rateMissing", mapOf("code" to currency))
-                    else -> fmt.t(
-                        "tx.converted",
-                        mapOf(
-                            "amount" to fmt.money(
-                                Money.toMain(minor, currency, draft.rate, draft.rateBase, ctx)
+                    rateUnknown -> fmt.t("tx.rateMissing", mapOf("code" to currency))
+                    else -> buildList {
+                        if (showsTotal) {
+                            add(fmt.t("tx.calcEquals", mapOf("amount" to fmt.money(minor, currency))))
+                        }
+                        if (currency != ctx.main) {
+                            add(
+                                fmt.t(
+                                    "tx.converted",
+                                    mapOf(
+                                        "amount" to fmt.money(
+                                            Money.toMain(minor, currency, draft.rate, draft.rateBase, ctx)
+                                        )
+                                    ),
+                                )
                             )
-                        ),
-                    )
+                        }
+                    }.joinToString("  ·  ")
                 }
                 Text(
                     hint,
                     style = MaterialTheme.typography.labelMedium,
-                    color = if (draft.amount.isNotBlank() && minor == null) c.warn else c.faint,
+                    fontWeight = if (showsTotal) FontWeight.SemiBold else FontWeight.Normal,
+                    color = when {
+                        unreadable || rateUnknown -> c.warn
+                        showsTotal -> c.text
+                        else -> c.faint
+                    },
                     modifier = Modifier.weight(1f),
                 )
                 if (currency != ctx.main) {
@@ -495,10 +534,10 @@ fun SheetHeader(title: String, onClose: () -> Unit) {
 
 @Composable
 private fun AmountField(
-    value: String,
+    value: TextFieldValue,
     currency: String,
     kindColour: androidx.compose.ui.graphics.Color,
-    onChange: (String) -> Unit,
+    onChange: (TextFieldValue) -> Unit,
 ) {
     val c = LocalTallyColors.current
     Row(
@@ -532,7 +571,7 @@ private fun AmountField(
             modifier = Modifier.weight(1f),
             decorationBox = { inner ->
                 Box(contentAlignment = Alignment.CenterEnd) {
-                    if (value.isEmpty()) {
+                    if (value.text.isEmpty()) {
                         Text(
                             "0",
                             fontSize = 30.sp,

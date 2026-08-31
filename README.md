@@ -7,6 +7,27 @@ Web app: [hanifedma/tally](https://github.com/hanifedma/tally)
 
 ---
 
+<p align="center">
+  <img src="docs/screenshots/log-dark.png" width="240" alt="The log: a month grouped by day, won and rupiah side by side" />
+  <img src="docs/screenshots/insights.png" width="240" alt="Insights: budgets, and where the money went" />
+  <img src="docs/screenshots/accounts.png" width="240" alt="Accounts, each in its own currency, with one net worth" />
+</p>
+<p align="center">
+  <img src="docs/screenshots/editor.png" width="240" alt="Adding a transaction, with a calculator in the amount field" />
+  <img src="docs/screenshots/log-light.png" width="240" alt="The same screen in light mode" />
+  <img src="docs/screenshots/log-korean.png" width="240" alt="The same screen in Korean" />
+</p>
+
+<p align="center"><sub>
+Taken on a Galaxy A15 (Android 14) by <a href="tools/screenshots.sh">tools/screenshots.sh</a>.
+The ledger in them is the one the
+<a href="https://github.com/hanifedma/tally#readme">web screenshots</a> use, so
+the two can be compared row by row — the same ₩260,768 of expenses, the same
+₩13,139,252 of net worth, arrived at by two separate implementations.
+</sub></p>
+
+---
+
 ## What it is
 
 The same ledger as the website, not a copy of it. Both apps read and write the
@@ -45,6 +66,11 @@ erased at the far end, so a failure there loses nothing.
 
 This is also the only way in on a phone with no Google Play Services, where
 Credential Manager cannot offer an account at all.
+
+<p align="center">
+  <img src="docs/screenshots/setup.png" width="240" alt="First run: a way in that needs no project and no account" />
+  <img src="docs/screenshots/settings.png" width="240" alt="Settings, saying plainly that this ledger is on this device only" />
+</p>
 
 ## Setup
 

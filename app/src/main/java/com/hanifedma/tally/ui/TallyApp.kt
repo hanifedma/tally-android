@@ -16,6 +16,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
@@ -132,7 +134,7 @@ fun TallyApp(vm: TallyViewModel) {
         if (ui.booting) {
             Box(Modifier.fillMaxSize().background(c.bg), contentAlignment = Alignment.Center) {
                 Image(
-                    painterResource(R.mipmap.ic_launcher),
+                    painterResource(R.drawable.ic_tally_mark),
                     contentDescription = null,
                     modifier = Modifier.size(56.dp).clip(RoundedCornerShape(16.dp)),
                 )
@@ -260,24 +262,35 @@ fun TallyApp(vm: TallyViewModel) {
                 }
             },
         ) { padding ->
+            // Room for the floating button *and* for whatever the system puts
+            // at the bottom. Without the inset the last row of a list comes to
+            // rest under the navigation bar, where it can be seen but not
+            // read — and a gesture-navigation phone, which has almost no
+            // inset, would never show the problem.
+            val listPadding = PaddingValues(
+                start = 12.dp,
+                end = 12.dp,
+                top = 6.dp,
+                bottom = 92.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding(),
+            )
             Box(Modifier.fillMaxSize().padding(top = padding.calculateTopPadding())) {
                 when (ui.tab) {
                     TallyViewModel.Tab.LOG -> LogScreen(
                         ledger, fmt, period, ui.searching, ui.search,
-                        PaddingValues(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 92.dp),
+                        listPadding,
                         onOpen = { push(Sheet.Editor(Draft.from(it), it)) },
                         onAddFirst = { push(Sheet.Editor(newDraft(ledger), null)) },
                     )
                     TallyViewModel.Tab.INSIGHTS -> InsightsScreen(
                         ledger, fmt, period, ui.insightsIncome,
-                        PaddingValues(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 92.dp),
+                        listPadding,
                         onShowIncome = { vm.setInsightsIncome(it) },
                         onEditBudgets = { push(Sheet.Budgets) },
                         onPickPeriod = { vm.goToPeriod(it) },
                     )
                     TallyViewModel.Tab.ACCOUNTS -> AccountsScreen(
                         ledger, fmt, ui.showArchivedAccounts,
-                        PaddingValues(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 92.dp),
+                        listPadding,
                         onOpen = { push(Sheet.EditAccount(it)) },
                         onAdd = { push(Sheet.EditAccount(null)) },
                         onToggleArchived = { vm.setShowArchivedAccounts(!ui.showArchivedAccounts) },
@@ -519,7 +532,7 @@ private fun TopBar(
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Image(
-            painterResource(R.mipmap.ic_launcher),
+            painterResource(R.drawable.ic_tally_mark),
             contentDescription = null,
             modifier = Modifier.size(22.dp).clip(RoundedCornerShape(6.dp)),
         )
@@ -534,7 +547,10 @@ private fun TopBar(
         SyncChip(fmt, sync)
         Spacer(Modifier.weight(1f))
         IconButton("⌕") { vm.setSearching(true) }
-        IconButton(if (vm.isDark) "☀" else "☾") { vm.toggleTheme() }
+        // U+FE0E asks for the text presentation of these two. Without it a
+        // Samsung draws a full-colour emoji sun in the middle of a row of
+        // monochrome glyphs, which reads as a mistake because it is one.
+        IconButton(if (vm.isDark) "☀︎" else "☾︎") { vm.toggleTheme() }
         IconButton(if (fmt.lang == "ko") "EN" else "KO", small = true) { vm.toggleLang() }
         val avatar = ui.account?.avatarUrl
         if (avatar != null) {
@@ -692,7 +708,7 @@ private fun SetupScreen(fmt: Fmt, onUseLocal: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Image(
-            painterResource(R.mipmap.ic_launcher),
+            painterResource(R.drawable.ic_tally_mark),
             contentDescription = null,
             modifier = Modifier.size(64.dp).clip(RoundedCornerShape(18.dp)),
         )

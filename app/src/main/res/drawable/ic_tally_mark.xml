@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The app mark, for drawing *inside* the app.
+
+     Not @mipmap/ic_launcher. On API 26 and up that resolves to the
+     adaptive-icon XML, which is neither a VectorDrawable nor a bitmap, and
+     Compose's painterResource throws on it:
+
+         Only VectorDrawables and rasterized asset types are supported
+
+     It would have worked on API 23-25, where the same id resolves to a PNG.
+     A launcher icon is a launcher's to compose; this is the same tile drawn
+     as one ordinary vector so anything can load it.
+
+     The tile and the curve are the same two shapes as ic_launcher_background
+     and ic_launcher_foreground, in the same 108x108 space, so every
+     rendering of the mark is one shape. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Rounded like a launcher would crop it, so it looks the same in the
+         app as it does on the home screen. -->
+    <path android:pathData="M0,24 C0,10.7 10.7,0 24,0 h60 C97.3,0 108,10.7 108,24 v60 C108,97.3 97.3,108 84,108 h-60 C10.7,108 0,97.3 0,84 z">
+        <aapt:attr xmlns:aapt="http://schemas.android.com/aapt" name="android:fillColor">
+            <gradient
+                android:startX="0" android:startY="0"
+                android:endX="108" android:endY="108"
+                android:type="linear">
+                <item android:offset="0" android:color="#FF8B93FF" />
+                <item android:offset="1" android:color="#FF4F46E5" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <path
+        android:pathData="M32,74 C47.4,71.6 61.9,62 76,34"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="9.5"
+        android:strokeLineCap="round" />
+</vector>

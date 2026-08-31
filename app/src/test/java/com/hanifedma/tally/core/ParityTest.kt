@@ -2,6 +2,7 @@ package com.hanifedma.tally.core
 
 import com.hanifedma.tally.i18n.Strings
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -113,6 +114,19 @@ class ParityTest {
         assertEquals(1200.0, Calc.eval("1,200")!!, 1e-9)
         assertEquals(36.0, Calc.eval("12×3")!!, 1e-9)
         assertEquals(3.0, Calc.eval("12÷4")!!, 1e-9)
+    }
+
+    /** The same cases as isExpression in the web app's tests.js. */
+    @Test
+    fun `a sum is told apart from a number, so only a sum shows its answer`() {
+        for (yes in listOf("12000+3400", "2*3", "12×3", "12÷4", "100 - 20", "(2+3)*4")) {
+            assertTrue(yes, Calc.isExpression(yes))
+        }
+        // A number someone typed with a sign is not arithmetic in progress.
+        for (no in listOf("12000", "1,200", "12.50", "", "-500", "−500")) {
+            assertFalse(no, Calc.isExpression(no))
+        }
+        assertFalse(Calc.isExpression(null))
     }
 
     @Test

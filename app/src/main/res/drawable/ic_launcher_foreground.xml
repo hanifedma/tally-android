@@ -9,9 +9,16 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <path
-        android:pathData="M32,74 C47.4,71.6 61.9,62 76,34"
-        android:strokeColor="#FFFFFFFF"
-        android:strokeWidth="9.5"
-        android:strokeLineCap="round" />
+    <!-- Scaled to about three quarters. A launcher crops this to a circle or
+         a squircle of 72 in this 108 space and then scales the result up, so
+         art drawn to the full safe zone comes out looking oversized on the
+         home screen — which is what it did. The legacy PNG mipmaps are not
+         cropped and are deliberately left at full size. -->
+    <group android:scaleX="0.76" android:scaleY="0.76" android:pivotX="54" android:pivotY="54">
+        <path
+            android:pathData="M32,74 C47.4,71.6 61.9,62 76,34"
+            android:strokeColor="#FFFFFFFF"
+            android:strokeWidth="9.5"
+            android:strokeLineCap="round" />
+    </group>
 </vector>

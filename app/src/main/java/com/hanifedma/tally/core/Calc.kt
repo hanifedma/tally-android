@@ -20,6 +20,20 @@ object Calc {
      * @return the value, or null when the expression is incomplete or
      *         malformed — the caller shows the field as unfinished, not wrong.
      */
+    /**
+     * True when the input is a sum rather than a plain number — something
+     * whose answer is worth showing before it is saved.
+     *
+     * A leading minus does not count: "-500" is a number someone typed, not
+     * arithmetic they are part-way through. Mirrors isExpression in money.js.
+     */
+    fun isExpression(input: String?): Boolean {
+        val src = (input ?: "")
+            .replace(Regex("""[,\s]"""), "")
+            .replace(Regex("""^[-−–—+]"""), "")
+        return Regex("""[+\-−–—*/×÷xX()]""").containsMatchIn(src)
+    }
+
     fun eval(input: String?): Double? {
         val src = (input ?: "")
             .replace('×', '*').replace('x', '*').replace('X', '*')
