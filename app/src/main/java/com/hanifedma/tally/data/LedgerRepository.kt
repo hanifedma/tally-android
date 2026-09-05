@@ -35,8 +35,10 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonObject
 
 /**
  * The ledger — the Kotlin half of store.js.
@@ -223,8 +225,24 @@ class LedgerRepository(
             val batch = pending.values.toList()
             // updated_at belongs to the server — it is the delta cursor. The
             // trigger overrules us anyway; not sending it says so.
+            //
+            // "Not sending it" has to mean the key is absent, not present and
+            // null: this Json writes explicit nulls, and both timestamps are
+            // NOT NULL columns with a default. updated_at survives that on
+            // the trigger alone; created_at has no trigger, so a null is
+            // refused outright (23502) — permanently, so the outbox drops the
+            // row and says "Couldn't save that". That is every write a new
+            // account makes, since a row has no created_at until the server
+            // hands one back. Dropping the key takes the default on an
+            // insert and keeps the existing value on an update.
+            val serverStamped = setOf("created_at", "updated_at")
             val payload = JsonArray(
-                batch.map { Supabase.json.encodeToJsonElement(serializer, stripUpdatedAt(it)) }
+                batch.map {
+                    val obj = Supabase.json
+                        .encodeToJsonElement(serializer, stripUpdatedAt(it))
+                        .jsonObject
+                    JsonObject(obj.filterNot { (k, v) -> k in serverStamped && v is JsonNull })
+                }
             )
             val result = try {
                 client.from(name).upsert(payload) {
@@ -605,6 +623,10 @@ class LedgerRepository(
         val message = e.message.orEmpty()
         // Keeps its place in the queue, however long that takes.
         if (isSetupProblem(e)) return true
+        // "Not now" is not "never": a timeout or a rate limit says nothing
+        // at all about the row, and dropping it would throw away the only
+        // copy of it there is.
+        if (Regex("""\b(408|429)\b""").containsMatchIn(message)) return true
         // PostgREST rejects a bad row with a 4xx and a reason; a dropped
         // connection has neither.
         if (Regex("""\b4\d\d\b""").containsMatchIn(message)) return false
