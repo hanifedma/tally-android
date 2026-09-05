@@ -14,6 +14,7 @@ import com.hanifedma.tally.data.LocalStore
 import com.hanifedma.tally.data.Prefs
 import com.hanifedma.tally.data.Supabase
 import com.hanifedma.tally.i18n.Strings
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -69,7 +70,25 @@ class TallyViewModel(app: Application) : AndroidViewModel(app) {
     private val _localTheme = MutableStateFlow("dark")
     private val _localLang = MutableStateFlow("en")
 
+    /**
+     * The same two values, for the screens.
+     *
+     * They have to be collectable rather than read through `theme`/`lang`
+     * below. Those are plain getters over a StateFlow's `.value`, which is
+     * not a snapshot read: Compose never learns that anyone looked, so
+     * changing one recomposes nothing. Signed in that went unnoticed, because
+     * every change also emitted a new ledger and `ledger` *is* collected —
+     * the recomposition it caused re-read the getter and the theme appeared
+     * to work. On the login screen there is no ledger to emit, so the toggle
+     * did nothing at all.
+     */
+    val localTheme: StateFlow<String> = _localTheme.asStateFlow()
+    val localLang: StateFlow<String> = _localLang.asStateFlow()
+
     private var repo: LedgerRepository? = null
+
+    /** The one collector of `auth.accounts()`; see watchAccount. */
+    private var authJob: Job? = null
 
     /** True once a ledger is open, whichever way in was taken. */
     private val active: Boolean
@@ -103,6 +122,24 @@ class TallyViewModel(app: Application) : AndroidViewModel(app) {
                 _ui.value = _ui.value.copy(booting = false)
                 return@launch
             }
+            watchAccount()
+        }
+    }
+
+    /**
+     * Follow the signed-in account, and only ever from one place.
+     *
+     * `sessionStatus` is a hot flow that emits more than once on the way up —
+     * initialising, then not-authenticated. Left running after someone
+     * chooses to work without an account, that second emission arrives as
+     * `onAccount(null)`, which closes the repository and empties the ledger:
+     * tap "without an account" quickly enough and the device ledger was shut
+     * down underneath the screen still showing it. Cancelling first also
+     * stops `leaveLocal` stacking a second collector on every visit.
+     */
+    private fun watchAccount() {
+        authJob?.cancel()
+        authJob = viewModelScope.launch {
             auth.accounts().collect { account -> onAccount(account) }
         }
     }
@@ -116,6 +153,10 @@ class TallyViewModel(app: Application) : AndroidViewModel(app) {
      * every path to the network closed.
      */
     fun useLocal() {
+        // Stop following the account first: an emission arriving after this
+        // would tear down the very ledger being opened.
+        authJob?.cancel()
+        authJob = null
         viewModelScope.launch {
             prefs.setMode("local")
             startLocal()
@@ -157,10 +198,8 @@ class TallyViewModel(app: Application) : AndroidViewModel(app) {
             repo = null
             _ledger.value = Ledger()
             _ui.value = _ui.value.copy(local = false, signedIn = false, account = null)
-            if (Supabase.isConfigured) {
-                auth.accounts().collect { account -> onAccount(account) }
-            }
         }
+        if (Supabase.isConfigured) watchAccount()
     }
 
     /** Throw away the device-only ledger and start again, still local. */

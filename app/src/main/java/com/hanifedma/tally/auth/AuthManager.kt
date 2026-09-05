@@ -69,10 +69,31 @@ class AuthManager {
         if (!Supabase.hasGoogleClientId) return "err.auth.config"
         val manager = CredentialManager.create(context)
 
+        val startedAt = android.os.SystemClock.elapsedRealtime()
         val token = try {
             requestToken(manager, context)
         } catch (e: GetCredentialCancellationException) {
-            return "err.auth.cancelled"
+            // Play Services reports a *configuration* failure the same way a
+            // person pressing back is reported: the chooser is dismissed and
+            // Credential Manager calls it a cancellation
+            // (status: CANCELED, source: REMOTE_PROVIDER). Swallowing both
+            // silently is what made a wrong client id look like a dead
+            // button — nothing happened, and nothing said why.
+            //
+            // The two are still tellable apart by the clock. Refusing the
+            // request needs one round trip to Play Services and comes back
+            // in well under a second; cancelling means a human read a dialog
+            // and decided, which does not. So a cancellation this fast is
+            // not a decision, and is worth saying out loud.
+            //
+            // What it is not is a diagnosis. Play Services refuses for two
+            // quite different reasons — no Google account on the device at
+            // all, and a client id it will not accept — and reports them
+            // identically, so the message names both rather than guessing
+            // one and sending someone to edit a file that was already right.
+            val elapsed = android.os.SystemClock.elapsedRealtime() - startedAt
+            Log.w(TAG, "Credential request cancelled after ${elapsed}ms", e)
+            return if (elapsed < NO_UI_SHOWN_MS) "err.auth.unavailable" else "err.auth.cancelled"
         } catch (e: NoCredentialException) {
             return "err.auth.noAccount"
         } catch (e: IOException) {
@@ -155,5 +176,14 @@ class AuthManager {
         }
     }
 
-    private companion object { const val TAG = "TallyAuth" }
+    private companion object {
+        const val TAG = "TallyAuth"
+
+        /**
+         * Below this, nobody read a dialog and decided anything — so a
+         * "cancellation" that arrives this fast came from Play Services
+         * refusing the request, not from the person holding the phone.
+         */
+        const val NO_UI_SHOWN_MS = 1200L
+    }
 }

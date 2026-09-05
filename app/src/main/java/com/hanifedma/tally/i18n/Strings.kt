@@ -281,6 +281,8 @@ object Strings {
         "err.auth.network" to "No connection — sign-in needs one.",
         "err.auth.generic" to "Sign-in failed. Try again.",
         "err.auth.config" to "Sign-in isn't configured yet. See SETUP.md.",
+        "err.auth.unavailable" to
+            "Google wouldn't sign you in. Check this device has a Google account added, and that the app's sign-in setup is complete.",
         "err.nameTaken" to "You already have one called that.",
         "err.rateBad" to "Enter a number greater than zero.",
         "err.tooMany" to "That is more than Tally can store.",
@@ -553,6 +555,8 @@ object Strings {
         "err.auth.network" to "연결이 없어 로그인할 수 없습니다.",
         "err.auth.generic" to "로그인하지 못했습니다. 다시 시도해 주세요.",
         "err.auth.config" to "로그인이 아직 설정되지 않았습니다. SETUP.md를 참고하세요.",
+        "err.auth.unavailable" to
+            "Google이 로그인을 거부했습니다. 이 기기에 Google 계정이 추가되어 있는지, 로그인 설정이 완료되었는지 확인해 주세요.",
         "err.nameTaken" to "같은 이름이 이미 있습니다.",
         "err.rateBad" to "0보다 큰 숫자를 입력하세요.",
         "err.tooMany" to "Tally가 저장할 수 있는 범위를 넘었습니다.",

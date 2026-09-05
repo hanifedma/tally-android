@@ -125,11 +125,20 @@ fun TallyApp(vm: TallyViewModel) {
     val ui by vm.ui.collectAsStateWithLifecycle()
     val ledger by vm.ledger.collectAsStateWithLifecycle()
     val sync by vm.sync.collectAsStateWithLifecycle()
+    val localTheme by vm.localTheme.collectAsStateWithLifecycle()
+    val localLang by vm.localLang.collectAsStateWithLifecycle()
 
-    TallyTheme(dark = vm.isDark) {
+    // Collected, not read off the view model. See TallyViewModel.localTheme
+    // for why a getter over StateFlow.value cannot drive a recomposition —
+    // it is the whole reason the login screen's theme chip did nothing.
+    val active = ui.signedIn || ui.local
+    val lang = if (active) ledger.settings.lang else localLang
+    val dark = (if (active) ledger.settings.theme else localTheme) != "light"
+
+    TallyTheme(dark = dark) {
         val c = LocalTallyColors.current
-        val fmt = remember(vm.lang, ledger.settings.mainCurrency) {
-            Fmt(vm.lang, ledger.settings.mainCurrency)
+        val fmt = remember(lang, ledger.settings.mainCurrency) {
+            Fmt(lang, ledger.settings.mainCurrency)
         }
         val context = LocalContext.current
         val snackbars = remember { SnackbarHostState() }
@@ -161,8 +170,25 @@ fun TallyApp(vm: TallyViewModel) {
         // A ledger on this device needs neither a project nor an account, so
         // neither screen below is a dead end any more.
         if (!ui.signedIn && !ui.local) {
-            if (!Supabase.isConfigured) SetupScreen(fmt, onUseLocal = { vm.useLocal() })
-            else LoginScreen(vm, fmt, ui.signingIn, vm.isDark)
+            // With its own host for the snackbar.
+            //
+            // The one below belongs to the Scaffold, which this return never
+            // reaches — so every message raised here was handed to a host
+            // nothing was drawing, and `showSnackbar` suspended for ever
+            // waiting for a host to take it. Sign-in is the only thing that
+            // *can* fail on this screen, which made every one of its failures
+            // invisible: the button was pressed, Google refused, and the app
+            // said nothing at all.
+            Box(Modifier.fillMaxSize()) {
+                if (!Supabase.isConfigured) SetupScreen(fmt, onUseLocal = { vm.useLocal() })
+                else LoginScreen(vm, fmt, ui.signingIn, dark)
+                SnackbarHost(
+                    snackbars,
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .windowInsetsPadding(WindowInsets.navigationBars),
+                )
+            }
             return@TallyTheme
         }
 
@@ -222,7 +248,7 @@ fun TallyApp(vm: TallyViewModel) {
                 Column(
                     Modifier.background(c.bg).windowInsetsPadding(WindowInsets.statusBars)
                 ) {
-                    TopBar(vm, fmt, ui, sync, onSettings = { push(Sheet.Settings) })
+                    TopBar(vm, fmt, ui, sync, dark, onSettings = { push(Sheet.Settings) })
                     if (ui.searching) {
                         Row(
                             Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
@@ -615,6 +641,7 @@ private fun TopBar(
     fmt: Fmt,
     ui: TallyViewModel.UiState,
     sync: LedgerRepository.Sync,
+    dark: Boolean,
     onSettings: () -> Unit,
 ) {
     val c = LocalTallyColors.current
@@ -642,7 +669,7 @@ private fun TopBar(
         // U+FE0E asks for the text presentation of these two. Without it a
         // Samsung draws a full-colour emoji sun in the middle of a row of
         // monochrome glyphs, which reads as a mistake because it is one.
-        IconButton(if (vm.isDark) "☀︎" else "☾︎") { vm.toggleTheme() }
+        IconButton(if (dark) "☀︎" else "☾︎") { vm.toggleTheme() }
         IconButton(if (fmt.lang == "ko") "EN" else "KO", small = true) { vm.toggleLang() }
         val avatar = ui.account?.avatarUrl
         if (avatar != null) {
