@@ -38,8 +38,10 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -103,6 +105,20 @@ sealed interface Sheet {
     data class EditRate(val code: String, val onPick: (Double) -> Unit) : Sheet
 }
 
+/**
+ * A question asked before something irreversible.
+ *
+ * A dialog rather than another sheet: a sheet is a window of its own, and one
+ * sheet cannot reliably ask a question on top of another. It is also the
+ * right shape — this is not a place, it is a decision.
+ */
+data class Confirm(
+    val title: String,
+    val body: String,
+    val confirmLabel: String,
+    val onConfirm: () -> Unit,
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TallyApp(vm: TallyViewModel) {
@@ -119,6 +135,7 @@ fun TallyApp(vm: TallyViewModel) {
         val snackbars = remember { SnackbarHostState() }
         val scope = rememberCoroutineScope()
         val stack = remember { mutableStateListOf<Sheet>() }
+        var confirm by remember { mutableStateOf<Confirm?>(null) }
 
         fun push(sheet: Sheet) = stack.add(sheet)
         fun popTo(index: Int) { while (stack.size > index) stack.removeAt(stack.lastIndex) }
@@ -320,13 +337,41 @@ fun TallyApp(vm: TallyViewModel) {
                         onCloseAll = { popAll() },
                         onPush = { push(it) },
                         onDeleteTransaction = { deleteTransaction(it) },
+                        onConfirm = { confirm = it },
                         onSignOut = {
-                            popAll()
-                            vm.signOut(context)
+                            confirm = Confirm(
+                                title = fmt.t("signout.confirm"),
+                                body = fmt.t("signout.body"),
+                                confirmLabel = fmt.t("signout"),
+                            ) {
+                                popAll()
+                                vm.signOut(context)
+                            }
                         },
                     )
                 }
             }
+        }
+
+        // ---- and, above everything, the one question worth asking ----
+        confirm?.let { ask ->
+            AlertDialog(
+                onDismissRequest = { confirm = null },
+                containerColor = c.surface,
+                title = { Text(ask.title, color = c.text) },
+                text = { Text(ask.body, color = c.muted) },
+                confirmButton = {
+                    TextButton(onClick = {
+                        confirm = null
+                        ask.onConfirm()
+                    }) { Text(ask.confirmLabel, color = c.danger) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { confirm = null }) {
+                        Text(fmt.t("cancel"), color = c.muted)
+                    }
+                },
+            )
         }
     }
 }
@@ -360,6 +405,7 @@ private fun SheetContent(
     onCloseAll: () -> Unit,
     onPush: (Sheet) -> Unit,
     onDeleteTransaction: (TransactionRow) -> Unit,
+    onConfirm: (Confirm) -> Unit,
     onSignOut: () -> Unit,
 ) {
     val repo = vm.repository()
@@ -414,17 +460,40 @@ private fun SheetContent(
             onClose = onClose,
         )
 
+        // Deleting asks first, and says what it costs: the transactions
+        // survive, but they stop belonging to anything. Until this it deleted
+        // on the first tap, which the web app has never done.
         is Sheet.EditAccount -> AccountEditorSheet(
             ledger, fmt, sheet.account,
             onSave = { repo?.put(it); onClose() },
-            onDelete = { repo?.delete(it); onClose() },
+            onDelete = { account ->
+                val n = ledger.transactions.count {
+                    it.accountId == account.id || it.toAccountId == account.id
+                }
+                onConfirm(
+                    Confirm(
+                        title = fmt.t("acc.deleteConfirm", mapOf("name" to account.name)),
+                        body = fmt.t("acc.deleteBody", mapOf("n" to n)),
+                        confirmLabel = fmt.t("delete"),
+                    ) { repo?.delete(account); onClose() }
+                )
+            },
             onClose = onClose,
         )
 
         is Sheet.EditCategory -> CategoryEditorSheet(
             ledger, fmt, sheet.category, sheet.kind,
             onSave = { repo?.put(it); onClose() },
-            onDelete = { repo?.delete(it); onClose() },
+            onDelete = { category ->
+                val n = ledger.transactions.count { it.categoryId == category.id }
+                onConfirm(
+                    Confirm(
+                        title = fmt.t("cat.deleteConfirm", mapOf("name" to category.name)),
+                        body = fmt.t("cat.deleteBody", mapOf("n" to n)),
+                        confirmLabel = fmt.t("delete"),
+                    ) { repo?.delete(category); onClose() }
+                )
+            },
             onClose = onClose,
         )
 
@@ -465,11 +534,34 @@ private fun SheetContent(
                 onCloseAll()
                 vm.leaveLocal()
             },
+            // The one action in the app that cannot be undone by any means.
             onErase = {
-                onCloseAll()
-                vm.eraseLocal()
+                onConfirm(
+                    Confirm(
+                        title = fmt.t("local.eraseConfirm"),
+                        body = fmt.t("local.eraseBody"),
+                        confirmLabel = fmt.t("local.erase"),
+                    ) { onCloseAll(); vm.eraseLocal() }
+                )
             },
-            onSettings = { vm.writeSettings(it) },
+            onSettings = { next ->
+                // The starting accounts follow the main currency while the
+                // ledger is still empty — what someone outside Korea wants,
+                // but done on their behalf, so say it happened rather than
+                // let them find it out later.
+                val before = ledger.accounts.joinToString { it.id + it.currency }
+                vm.writeSettings(next)
+                val after = repo?.ledger?.value?.accounts?.joinToString { it.id + it.currency }
+                if (after != null && after != before) {
+                    vm.showMessage(
+                        "set.accountsFollowed",
+                        literal = fmt.t(
+                            "set.accountsFollowed",
+                            mapOf("code" to next.mainCurrency),
+                        ),
+                    )
+                }
+            },
             onManageCategories = { onPush(Sheet.ManageCategories("expense")) },
             onManageAccounts = {
                 onCloseAll()

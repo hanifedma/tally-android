@@ -99,3 +99,42 @@ val SEED_ACCOUNTS = listOf(
     SeedAccount("cash", "cash", "green", "Cash", "현금"),
     SeedAccount("bank", "bank", "indigo", "Bank", "은행"),
 )
+
+/**
+ * May the starting accounts be re-denominated, now the main currency has
+ * changed from [from]?
+ *
+ * Only while the ledger is still exactly what the app put there. An account's
+ * currency stops being a preference the instant an amount is filed under it:
+ * [Compute.balances] adds minor units without converting, on the promise that
+ * a transaction is always in its account's currency. Transactions are counted
+ * including tombstones, because a delete can still be undone.
+ *
+ * @param accounts         every account row, tombstones included
+ * @param transactionCount how many transaction rows exist at all
+ * @param starterIds       the ids this account would derive for its starters
+ * @param from             the currency they must all still be in
+ */
+fun startersMayFollow(
+    accounts: List<AccountRow>,
+    transactionCount: Int,
+    starterIds: Set<String>,
+    from: String,
+): Boolean {
+    if (transactionCount > 0) return false
+    val live = accounts.filter { it.deletedAt == null }
+    if (live.isEmpty()) return false
+    return live.all { it.id in starterIds && it.currency == from && it.openingMinor == 0L }
+}
+
+/**
+ * The new name for a starter row after a language change, or null to leave it
+ * as it is.
+ *
+ * Names are data, not interface. A row keeps whatever it is called unless it
+ * is still called exactly what the app called it in the language being left.
+ */
+fun starterRename(currentName: String, fromName: String, toName: String): String? {
+    if (currentName != fromName || currentName == toName) return null
+    return toName
+}

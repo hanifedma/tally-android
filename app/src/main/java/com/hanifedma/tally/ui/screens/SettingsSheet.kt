@@ -125,7 +125,15 @@ fun SettingsSheet(
                     Help(fmt.t("local.signInHelp"), Modifier.padding(top = 6.dp))
                 }
                 Spacer(Modifier.height(10.dp))
-                GhostButton(fmt.t("local.erase"), Modifier.fillMaxWidth(), onClick = onErase)
+                // Marked destructive: it sits in exactly the place "Sign out"
+                // does for a signed-in account, and erasing a ledger for ever
+                // must not look identical to leaving one behind.
+                GhostButton(
+                    fmt.t("local.erase"),
+                    Modifier.fillMaxWidth(),
+                    danger = true,
+                    onClick = onErase,
+                )
             } else {
                 Section(fmt.t("set.account"))
                 if (email != null) {

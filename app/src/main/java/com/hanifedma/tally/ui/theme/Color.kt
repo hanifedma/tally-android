@@ -30,6 +30,13 @@ data class TallyColors(
     val dangerSoft: Color,
     val warn: Color,
     val warnSoft: Color,
+    /**
+     * The lifted segment of a segmented control. It has its own entry because
+     * it must always be lighter than the [surface2] track it sits in, and in
+     * the dark palette [surface] is *darker* than [surface2] — reusing it made
+     * the selected tab sink into the bar instead of standing on it.
+     */
+    val segOn: Color,
     val track: Color,
     val scrim: Color,
     val palette: Map<String, Color>,
@@ -59,6 +66,7 @@ val DarkColors = TallyColors(
     dangerSoft = Color(0x24F4566B),
     warn = Color(0xFFFBBF24),
     warnSoft = Color(0x21FBBF24),
+    segOn = Color(0xFF303039),
     track = Color(0xFF2A2A30),
     scrim = Color(0x9E000000),
     palette = mapOf(
@@ -99,6 +107,7 @@ val LightColors = TallyColors(
     // Darker than the dark theme's amber: #FBBF24 on white fails contrast.
     warn = Color(0xFFB45309),
     warnSoft = Color(0x1AB45309),
+    segOn = Color(0xFFFFFFFF),
     track = Color(0xFFE9E9EF),
     scrim = Color(0x66141420),
     palette = mapOf(

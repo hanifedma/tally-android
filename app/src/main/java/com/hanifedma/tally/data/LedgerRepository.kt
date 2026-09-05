@@ -11,6 +11,8 @@ import com.hanifedma.tally.core.SEED_ACCOUNTS
 import com.hanifedma.tally.core.SEED_CATEGORIES
 import com.hanifedma.tally.core.SettingsRow
 import com.hanifedma.tally.core.TransactionRow
+import com.hanifedma.tally.core.starterRename
+import com.hanifedma.tally.core.startersMayFollow
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.query.Order
 import io.github.jan.supabase.postgrest.query.filter.FilterOperator
@@ -157,6 +159,11 @@ class LedgerRepository(
         suspend fun pull(): Boolean {
             var changed = false
             var from = 0L
+            // A first fetch of this session is a complete one, so what does
+            // not come back is genuinely not there. Later fetches are deltas
+            // and say nothing about the rows they leave out.
+            val full = cursor == null
+            val arrived = if (full) HashSet<String>() else null
             while (true) {
                 val at = cursor
                 val result = client.from(name).select {
@@ -175,11 +182,39 @@ class LedgerRepository(
                     range(from, from + PAGE - 1)
                 }
                 val page = Supabase.json.decodeFromString(ListSerializer(serializer), result.data)
-                for (row in page) if (accept(row)) changed = true
+                for (row in page) {
+                    arrived?.add(idOf(row))
+                    if (accept(row)) changed = true
+                }
                 if (page.size < PAGE) break
                 from += PAGE
             }
+            if (arrived != null) requeueMissing(arrived)
             return changed
+        }
+
+        /**
+         * Put back anything this device has that the server has never seen.
+         *
+         * A write can leave the queue without arriving: the server refuses it
+         * for good and it is dropped rather than jam every later row behind
+         * it. Right for a row the server will never accept — wrong for one
+         * refused because the project was half set up, as a missing GRANT
+         * will do to every write an account ever makes. Either way the row is
+         * still in the cache, still on screen, still counted, and it is the
+         * only copy in existence.
+         *
+         * Tombstones are left out: a first fetch deliberately skips deleted
+         * rows, so every one this ledger ever had would look missing, every
+         * time the app opens. The same rule, in the same words, in store.js.
+         */
+        private fun requeueMissing(arrived: Set<String>) {
+            val missing = rows.values.filter {
+                deletedAtOf(it) == null && idOf(it) !in arrived
+            }
+            if (missing.isEmpty()) return
+            Log.w(TAG, "Re-sending ${missing.size} $name the server never received")
+            missing.forEach { enqueue(it) }
         }
 
         /** Send everything queued. Throws only for failures worth retrying. */
@@ -297,6 +332,8 @@ class LedgerRepository(
     private var settings = defaults ?: SettingsRow()
     private var settingsPending: SettingsRow? = null
     private var haveSettings = false
+    /** Said once per session: a missing GRANT does not need saying every 30s. */
+    private var warnedSetup = false
 
     private val writeLock = Mutex()
     private var channel: RealtimeChannel? = null
@@ -442,6 +479,9 @@ class LedgerRepository(
             publish()
         }
         setStatus(if (pendingCount() > 0) Status.SYNCING else Status.LIVE)
+        // A full pull can put rows back in the queue that were only ever on
+        // this device. They now have somewhere to go.
+        if (pendingCount() > 0) flush()
         retryDelayMs = 2_000L
     }
 
@@ -544,9 +584,27 @@ class LedgerRepository(
         scheduleRetry()
     }
 
+    /**
+     * "Not allowed", "no such table", "no such column".
+     *
+     * Not facts about the row being sent — facts about a database that has
+     * not finished being set up, whose fix is a line of SQL run somewhere
+     * else entirely. The row has to still be here when that happens. The
+     * same list, for the same reason, in store.js.
+     */
+    private fun isSetupProblem(e: Exception): Boolean {
+        val m = e.message.orEmpty()
+        return m.contains("permission denied", ignoreCase = true) ||
+            m.contains("42501") || m.contains("42P01") || m.contains("42703") ||
+            m.contains("PGRST") ||
+            Regex("""\b40[13]\b""").containsMatchIn(m)
+    }
+
     /** True for the kind of failure worth trying again later. */
     private fun isTransient(e: Exception): Boolean {
         val message = e.message.orEmpty()
+        // Keeps its place in the queue, however long that takes.
+        if (isSetupProblem(e)) return true
         // PostgREST rejects a bad row with a 4xx and a reason; a dropped
         // connection has neither.
         if (Regex("""\b4\d\d\b""").containsMatchIn(message)) return false
@@ -568,13 +626,64 @@ class LedgerRepository(
     }
 
     private fun enqueueSettings(next: SettingsRow) {
+        val was = settings.mainCurrency
+        val wasLang = settings.lang
         settings = next.normalized()
         haveSettings = true
         if (!local) settingsPending = settings.copy(userId = uid, updatedAt = null)
+        if (settings.mainCurrency != was) retuneStarterAccounts(was, settings.mainCurrency)
+        if (settings.lang != wasLang) retranslateStarters(wasLang, settings.lang)
         saveCache()
         saveOutbox()
         publish()
         flush()
+    }
+
+    /**
+     * The starting accounts follow the main currency, but only while they are
+     * still the ones we made.
+     *
+     * Someone who opens Tally in Jakarta wants a Cash account in rupiah, and
+     * should not have to fix by hand what the app got wrong by guessing. But
+     * the moment a single amount is filed under an account, its currency is a
+     * fact about that money and not a preference: [Compute.balances]
+     * adds minor units without converting, on the promise that a transaction
+     * is always in its account's currency. So this runs only for a ledger
+     * with no transactions at all — tombstones included, since a delete can
+     * still be undone — whose accounts are all untouched starters holding
+     * nothing.
+     */
+    private fun retuneStarterAccounts(from: String, to: String) {
+        val all = accounts.rows.values.toList()
+        val starters = SEED_ACCOUNTS.map { Ids.derived(uid, "account:${it.slug}") }.toSet()
+        if (!startersMayFollow(all, transactions.rows.size, starters, from)) return
+        all.filter { it.deletedAt == null }
+            .forEach { accounts.enqueue(it.copy(currency = to)) }
+    }
+
+    /**
+     * The starter categories and accounts follow the language, one row at a
+     * time, and only while a row still carries the name we gave it.
+     *
+     * Names are data, not interface: someone who renamed "Food" to "밥값"
+     * keeps their word for it for ever. But someone who never touched the
+     * starter set should not be left reading an English list inside a Korean
+     * app, and there is no ambiguity about which rows those are — the app
+     * wrote them, at ids it can recompute, with names it can still recognise.
+     */
+    private fun retranslateStarters(from: String, to: String) {
+        SEED_CATEGORIES.forEach { seed ->
+            val row = categories.rows[Ids.derived(uid, "category:${seed.slug}")] ?: return@forEach
+            if (row.deletedAt != null) return@forEach
+            val name = starterRename(row.name, seed.name(from), seed.name(to)) ?: return@forEach
+            categories.enqueue(row.copy(name = name))
+        }
+        SEED_ACCOUNTS.forEach { seed ->
+            val row = accounts.rows[Ids.derived(uid, "account:${seed.slug}")] ?: return@forEach
+            if (row.deletedAt != null) return@forEach
+            val name = starterRename(row.name, seed.name(from), seed.name(to)) ?: return@forEach
+            accounts.enqueue(row.copy(name = name))
+        }
     }
 
     fun put(row: AccountRow) = commit(accounts, row)
@@ -616,6 +725,14 @@ class LedgerRepository(
             retryDelayMs = 2_000L
         } catch (e: Exception) {
             Log.w(TAG, "Couldn't send changes yet", e)
+            // "Reconnecting…" is honest but useless when the connection is
+            // fine and the database is the problem. Say what it actually is,
+            // once — repeating it on every retry would be its own kind of
+            // broken.
+            if (isSetupProblem(e) && !warnedSetup) {
+                warnedSetup = true
+                _errors.value = "err.setup"
+            }
             setStatus(Status.OFFLINE)
             scheduleRetry()
         }

@@ -8,7 +8,7 @@ package com.hanifedma.tally.i18n
 //  Change the wording there and run the generator; StringsParityTest fails
 //  if this file falls behind.
 //
-//  267 keys, 2 languages.
+//  269 keys, 2 languages.
 // ============================================================
 
 object Strings {
@@ -230,6 +230,7 @@ object Strings {
         "set.money" to "Money",
         "set.mainCurrency" to "Main currency",
         "set.mainCurrencyHelp" to "Every total is shown in this. Accounts keep their own.",
+        "set.accountsFollowed" to "Your starting accounts are in {code} now. Once an account has money recorded in it, it keeps its own currency.",
         "set.rates" to "Exchange rates",
         "set.ratesHelp" to "What one unit is worth in {main}. Used for new entries; what you have already recorded keeps the rate it was entered with.",
         "set.rateFor" to "1 {code} =",
@@ -272,6 +273,7 @@ object Strings {
         "err.generic" to "Something went wrong. Try again.",
         "err.network" to "No connection. Saved on this device for now.",
         "err.save" to "Couldn't save that.",
+        "err.setup" to "The database refused that. Nothing is lost — it stays on this device and will be sent. Run schema.sql in Supabase again to finish setting the project up.",
         "err.delete" to "Couldn't delete that.",
         "err.load" to "Couldn't load your ledger.",
         "err.auth.cancelled" to "Sign-in cancelled.",
@@ -500,6 +502,7 @@ object Strings {
         "set.money" to "금액",
         "set.mainCurrency" to "기준 통화",
         "set.mainCurrencyHelp" to "모든 합계가 이 통화로 표시됩니다. 자산은 각자의 통화를 유지합니다.",
+        "set.accountsFollowed" to "시작 자산이 이제 {code}입니다. 내역이 기록된 자산은 각자의 통화를 유지합니다.",
         "set.rates" to "환율",
         "set.ratesHelp" to "1단위가 {main}로 얼마인지. 새 내역에 쓰이며, 이미 기록한 내역은 입력 당시의 환율을 유지합니다.",
         "set.rateFor" to "1 {code} =",
@@ -542,6 +545,7 @@ object Strings {
         "err.generic" to "문제가 발생했습니다. 다시 시도해 주세요.",
         "err.network" to "연결이 없습니다. 이 기기에 임시로 저장했습니다.",
         "err.save" to "저장하지 못했습니다.",
+        "err.setup" to "데이터베이스가 거부했습니다. 내용은 이 기기에 남아 있고 나중에 전송됩니다. Supabase에서 schema.sql을 다시 실행해 설정을 마무리하세요.",
         "err.delete" to "삭제하지 못했습니다.",
         "err.load" to "장부를 불러오지 못했습니다.",
         "err.auth.cancelled" to "로그인을 취소했습니다.",

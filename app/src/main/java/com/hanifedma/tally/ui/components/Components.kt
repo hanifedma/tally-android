@@ -124,7 +124,7 @@ fun Segmented(
                 Modifier
                     .weight(1f)
                     .clip(RoundedCornerShape(8.dp))
-                    .background(if (active) c.surface else Color.Transparent)
+                    .background(if (active) c.segOn else Color.Transparent)
                     .clickable { onSelect(index) }
                     .padding(vertical = 8.dp),
                 contentAlignment = Alignment.Center,
