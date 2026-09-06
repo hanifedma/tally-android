@@ -214,6 +214,17 @@ object Money {
         return (value * minorPerUnit(ctx.main)).roundToLong()
     }
 
+    /**
+     * A transfer's fee in the main currency; zero for everything else.
+     *
+     * The fee is charged in the sending account's currency, which is the
+     * row's own, so it converts through the row's own frozen rate — the same
+     * rate, and the same day, as the amount it was charged on.
+     */
+    fun feeToMain(tx: TransactionRow, ctx: Ctx): Long =
+        if (tx.kind != "transfer" || tx.feeMinor == 0L) 0L
+        else toMain(tx.feeMinor, tx.currency, tx.rate, tx.rateBase, ctx)
+
     /** What to freeze on a row written now. */
     fun rateForNew(code: String, ctx: Ctx): Double {
         val r = rateOf(code, ctx.main, ctx.rates)
@@ -246,6 +257,7 @@ object Money {
         toAccountId: String?,
         categoryId: String?,
         ctx: Ctx,
+        feeText: String = "",
     ): String? {
         val minor = parseToMinor(amountText, currency)
             ?: return if (amountText.isNotBlank()) "tx.calcBad" else "tx.needAmount"
@@ -254,6 +266,10 @@ object Money {
         if (kind == "transfer") {
             if (toAccountId.isNullOrEmpty()) return "tx.needToAccount"
             if (toAccountId == accountId) return "tx.sameAccount"
+            // Blank is the ordinary case and means no fee. Anything typed
+            // has to be a number, though — silently reading "1,00o" as
+            // nothing would hide money from every total that follows.
+            if (feeText.isNotBlank() && parseToMinor(feeText, currency) == null) return "tx.feeBad"
         } else if (categoryId.isNullOrEmpty()) {
             return "tx.needCategory"
         }

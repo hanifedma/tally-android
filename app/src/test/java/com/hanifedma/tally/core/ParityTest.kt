@@ -243,6 +243,7 @@ class ParityTest {
         accountId: String? = null,
         toAccountId: String? = null,
         toAmount: Long? = null,
+        fee: Long = 0,
         occurredOn: String = "2026-08-30",
         occurredMin: Int = 600,
         note: String = "",
@@ -250,7 +251,7 @@ class ParityTest {
     ) = TransactionRow(
         id = id, kind = kind, amountMinor = amount, currency = currency, rate = rate,
         rateBase = rateBase, categoryId = categoryId, accountId = accountId,
-        toAccountId = toAccountId, toAmountMinor = toAmount, note = note,
+        toAccountId = toAccountId, toAmountMinor = toAmount, feeMinor = fee, note = note,
         occurredOn = occurredOn, occurredMin = occurredMin,
     ).normalized()
 
@@ -348,6 +349,116 @@ class ParityTest {
         assertEquals(1832726L, totals.income)
         assertEquals(260452L, totals.expense)
         assertEquals(1832726L - 260452L, totals.net)
+    }
+
+    // ------------------------------------------------------------
+    //  Transfer fees. The expected numbers are the web suite's — see
+    //  tests.js, "a transfer's fee comes out of the account it was sent
+    //  from" and the three that follow it.
+    // ------------------------------------------------------------
+
+    @Test
+    fun `a transfer's fee comes out of the account it was sent from`() {
+        val rows = listOf(
+            tx(30000, kind = "transfer", accountId = "a1", toAccountId = "a3", fee = 1000)
+        )
+        val b = Compute.balances(accounts, rows)
+        assertEquals(100000L - 30000L - 1000L, b["a1"])
+        assertEquals(10000L, b["a3"])
+    }
+
+    @Test
+    fun `a fee on a cross-currency transfer is charged in the sending currency`() {
+        val rows = listOf(
+            tx(
+                100000, kind = "transfer", accountId = "a1", toAccountId = "a2",
+                toAmount = 1142857, fee = 5000,
+            )
+        )
+        val b = Compute.balances(accounts, rows)
+        assertEquals(100000L - 100000L - 5000L, b["a1"])
+        assertEquals(50000L + 1142857L, b["a2"])
+    }
+
+    @Test
+    fun `only a transfer can carry a fee`() {
+        assertEquals(0L, TransactionRow(id = "1", kind = "expense", feeMinor = 900).normalized().feeMinor)
+        assertEquals(0L, TransactionRow(id = "1", kind = "income", feeMinor = 900).normalized().feeMinor)
+        assertEquals(
+            900L,
+            TransactionRow(id = "1", kind = "transfer", toAccountId = "a2", feeMinor = 900)
+                .normalized().feeMinor,
+        )
+        assertEquals(
+            0L,
+            TransactionRow(id = "1", kind = "transfer", toAccountId = "a2", feeMinor = -5)
+                .normalized().feeMinor,
+        )
+    }
+
+    @Test
+    fun `a transfer's fee is spending, even though the transfer is not`() {
+        val rows = listOf(
+            tx(10000, accountId = "a1", categoryId = "c1"),
+            tx(500000, kind = "transfer", accountId = "a1", toAccountId = "a3", fee = 1500),
+        )
+        val totals = Compute.totals(rows, ctx)
+        assertEquals(0L, totals.income)
+        assertEquals(11500L, totals.expense)
+
+        // The breakdown under the number has to reach the same number, or
+        // the month's donut and the month's total disagree on screen.
+        val breakdown = Compute.byCategory(rows, "expense", ctx)
+        assertEquals(totals.expense, breakdown.total)
+        assertEquals(1500L, breakdown.rows.first { it.categoryId == Compute.FEE_CATEGORY }.amount)
+
+        val days = Compute.groupByDay(rows, ctx)
+        assertEquals(1, days.size)
+        assertEquals(11500L, days[0].expense)
+    }
+
+    @Test
+    fun `a fee counts against the overall budget and against no category`() {
+        val budgets = listOf(
+            BudgetRow(id = "b-all", categoryId = null, amountMinor = 100000, currency = "KRW"),
+            BudgetRow(id = "b-cat", categoryId = "c1", amountMinor = 100000, currency = "KRW"),
+        )
+        val rows = listOf(
+            tx(20000, accountId = "a1", categoryId = "c1"),
+            tx(900000, kind = "transfer", accountId = "a1", toAccountId = "a3", fee = 2500),
+        )
+        val progress = Compute.budgetProgress(budgets, rows, emptyList(), ctx)
+        assertEquals(22500L, progress.first { it.categoryId == null }.spent)
+        assertEquals(20000L, progress.first { it.categoryId == "c1" }.spent)
+    }
+
+    @Test
+    fun `a fee in another currency converts through the row's own frozen rate`() {
+        val rows = listOf(
+            tx(
+                1000000, currency = "IDR", rate = 0.0875, rateBase = "KRW",
+                kind = "transfer", accountId = "a2", toAccountId = "a1", fee = 20000,
+            )
+        )
+        // 20,000 IDR × 0.0875 = 1,750 KRW.
+        assertEquals(1750L, Compute.totals(rows, ctx).expense)
+    }
+
+    @Test
+    fun `a fee that is not a number is refused, and a blank one is not a fee`() {
+        val ok = { fee: String ->
+            Money.validate("1000", "KRW", "transfer", "a1", "a2", null, ctx, feeText = fee)
+        }
+        assertNull(ok(""))
+        assertNull(ok("   "))
+        assertNull(ok("1000"))
+        assertNull(ok("500+500"))
+        assertEquals("tx.feeBad", ok("1,00o"))
+        assertEquals("tx.feeBad", ok("12+"))
+        assertNull(
+            "an expense has no fee field, so there is nothing to reject",
+            Money.validate("1000", "KRW", "expense", "a1", null, "c1", ctx, feeText = "nonsense"),
+        )
     }
 
     @Test

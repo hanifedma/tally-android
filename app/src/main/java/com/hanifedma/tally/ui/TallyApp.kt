@@ -321,7 +321,14 @@ fun TallyApp(vm: TallyViewModel) {
                     TallyViewModel.Tab.LOG -> LogScreen(
                         ledger, fmt, period, ui.searching, ui.search,
                         listPadding,
-                        onOpen = { push(Sheet.Editor(Draft.from(it), it)) },
+                        onOpen = {
+                            push(
+                                Sheet.Editor(
+                                    Draft.from(it, ledger.account(it.toAccountId)?.currency),
+                                    it,
+                                )
+                            )
+                        },
                         onAddFirst = { push(Sheet.Editor(newDraft(ledger), null)) },
                     )
                     TallyViewModel.Tab.INSIGHTS -> InsightsScreen(

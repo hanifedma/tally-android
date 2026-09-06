@@ -72,6 +72,14 @@ data class Draft(
     val accountId: String? = null,
     val toAccountId: String? = null,
     val toAmount: String = "",
+    // The destination account's currency. `toAmount` is written in it, not
+    // in `currency`, and the two rarely have the same number of decimals —
+    // reading "10.50" as won and writing 1,050 minor units of dollars is a
+    // hundredfold error in what landed.
+    val toCurrency: String = Money.DEFAULT_CURRENCY,
+    // Text, like the amount: blank means no fee, so an untouched transfer
+    // does not come back reading "0".
+    val fee: String = "",
     val categoryId: String? = null,
     val note: String = "",
     val occurredOn: String = Dates.today(),
@@ -90,8 +98,9 @@ data class Draft(
             accountId = accountId,
             toAccountId = if (kind == "transfer") toAccountId else null,
             toAmountMinor = if (kind == "transfer" && toAmount.isNotBlank()) {
-                Money.parseToMinor(toAmount, currency)
+                Money.parseToMinor(toAmount, toCurrency)
             } else null,
+            feeMinor = if (kind == "transfer") Money.parseToMinor(fee, currency) ?: 0L else 0L,
             categoryId = if (kind == "transfer") null else categoryId,
             note = note.trim().take(280),
             occurredOn = occurredOn,
@@ -102,7 +111,13 @@ data class Draft(
     }
 
     companion object {
-        fun from(tx: TransactionRow) = Draft(
+        /**
+         * @param toCurrency what the destination account holds. The row does
+         *   not record it — only the account does — and `to_amount_minor` is
+         *   counted in it, so reopening a transfer without it would show the
+         *   landed amount at the wrong scale.
+         */
+        fun from(tx: TransactionRow, toCurrency: String? = null) = Draft(
             id = tx.id,
             kind = tx.kind,
             amount = Money.minorToInput(tx.amountMinor, tx.currency),
@@ -111,7 +126,10 @@ data class Draft(
             rateBase = tx.rateBase,
             accountId = tx.accountId,
             toAccountId = tx.toAccountId,
-            toAmount = tx.toAmountMinor?.let { Money.minorToInput(it, tx.currency) } ?: "",
+            toCurrency = toCurrency ?: tx.currency,
+            toAmount = tx.toAmountMinor
+                ?.let { Money.minorToInput(it, toCurrency ?: tx.currency) } ?: "",
+            fee = if (tx.feeMinor != 0L) Money.minorToInput(tx.feeMinor, tx.currency) else "",
             categoryId = tx.categoryId,
             note = tx.note,
             occurredOn = tx.occurredOn,
@@ -140,12 +158,23 @@ fun EditorSheet(
     var error by remember { mutableStateOf<String?>(null) }
     var showDate by remember { mutableStateOf(false) }
     var showTime by remember { mutableStateOf(false) }
-    var showSuggestions by remember { mutableStateOf(false) }
+
+    // The note's suggestion list is open whenever the field has focus, and
+    // shut only until the note next changes. Latching it shut on a tap and
+    // waiting for another focus event is what used to strand it: picking a
+    // suggestion never moves focus, so nothing ever re-opened the list.
+    var noteFocused by remember { mutableStateOf(false) }
+    var noteDismissed by remember { mutableStateOf(false) }
 
     // The amount field owns its own caret: the operator buttons append to it
     // and have to be able to put the cursor after what they inserted.
     var amountField by remember {
         mutableStateOf(TextFieldValue(draft.amount, TextRange(draft.amount.length)))
+    }
+    // The note owns its own for the same reason: a tapped suggestion
+    // replaces the whole text, and the caret belongs at the end of it.
+    var noteField by remember {
+        mutableStateOf(TextFieldValue(draft.note, TextRange(draft.note.length)))
     }
 
     val ctx = ledger.ctx
@@ -153,6 +182,10 @@ fun EditorSheet(
     val toAccount = ledger.account(draft.toAccountId)
     val currency = account?.currency ?: ctx.main
     if (currency != draft.currency) draft = draft.copy(currency = currency)
+    // Follows the destination account, so that changing it re-reads what
+    // landed at the new account's scale rather than the old one's.
+    val toCurrency = toAccount?.currency ?: currency
+    if (toCurrency != draft.toCurrency) draft = draft.copy(toCurrency = toCurrency)
 
     val isTransfer = draft.kind == "transfer"
     val category = ledger.category(draft.categoryId)
@@ -162,6 +195,7 @@ fun EditorSheet(
         val problem = Money.validate(
             draft.amount, currency, draft.kind,
             draft.accountId, draft.toAccountId, draft.categoryId, ctx,
+            feeText = draft.fee,
         )
         if (problem != null) {
             error = problem
@@ -175,10 +209,12 @@ fun EditorSheet(
                 amount = "",
                 note = "",
                 toAmount = "",
+                fee = "",
                 occurredMin = Dates.minuteOfDay(),
                 createdAt = null,
             )
             amountField = TextFieldValue("")
+            noteField = TextFieldValue("")
         }
     }
 
@@ -212,6 +248,7 @@ fun EditorSheet(
                             kind = next,
                             toAccountId = null,
                             toAmount = "",
+                            fee = "",
                             categoryId = draft.categoryId
                                 ?.takeIf { ledger.category(it)?.kind == next },
                         )
@@ -360,6 +397,26 @@ fun EditorSheet(
                         error = null
                     }
                 }
+                // What the bank kept. Blank almost always, so it is one short
+                // field rather than a section: a transfer that cost nothing
+                // should not have to say so.
+                val feeBad = draft.fee.isNotBlank() && Money.parseToMinor(draft.fee, currency) == null
+                FieldLabel(fmt.t("tx.fee") + " · " + currency)
+                PlainField(
+                    value = draft.fee,
+                    placeholder = Money.minorToInput(0L, currency),
+                    numeric = true,
+                    alignEnd = true,
+                ) {
+                    draft = draft.copy(fee = it)
+                    error = null
+                }
+                Help(
+                    if (feeBad) fmt.t("tx.feeBad") else fmt.t("tx.feeHelp"),
+                    Modifier.padding(top = 6.dp, bottom = 14.dp),
+                    warn = feeBad,
+                )
+
                 // Only a cross-currency transfer needs to say what landed.
                 if (account != null && toAccount != null && account.currency != toAccount.currency) {
                     FieldLabel(fmt.t("tx.receives") + " · " + toAccount.currency)
@@ -373,18 +430,35 @@ fun EditorSheet(
                         alignEnd = true,
                     ) { draft = draft.copy(toAmount = it) }
                     Help(fmt.t("tx.receivesHelp"), Modifier.padding(top = 6.dp, bottom = 14.dp))
+                } else if (draft.toAmount.isNotBlank()) {
+                    // The field is gone, so what was typed into it must go
+                    // too. Keeping it would send a number of dollars into a
+                    // won account with nothing on screen saying where it
+                    // came from.
+                    draft = draft.copy(toAmount = "")
                 }
             }
 
             // ---- note ----
             FieldLabel(fmt.t("tx.note"))
             PlainField(
-                value = draft.note,
+                value = noteField,
                 placeholder = fmt.t("tx.notePlaceholder"),
-                onFocus = { showSuggestions = it },
-            ) { draft = draft.copy(note = it) }
+                onFocus = { focused ->
+                    noteFocused = focused
+                    // Coming back to the field is a fresh ask, the same as
+                    // it is on the web, where focus re-runs the search.
+                    if (focused) noteDismissed = false
+                },
+            ) { next ->
+                // Typing — including clearing the box — is a new question,
+                // so it deserves a new answer. Moving the caret is not.
+                if (next.text != noteField.text) noteDismissed = false
+                noteField = next
+                draft = draft.copy(note = next.text)
+            }
 
-            if (showSuggestions) {
+            if (noteFocused && !noteDismissed) {
                 val suggestions = com.hanifedma.tally.core.Compute
                     .noteSuggestions(ledger.transactions, draft.note, 5)
                     .filter { !it.note.equals(draft.note.trim(), ignoreCase = true) }
@@ -409,13 +483,20 @@ fun EditorSheet(
                                     .clickable {
                                         // Reusing a note almost always means
                                         // reusing what it was filed under.
+                                        noteField = TextFieldValue(
+                                            s.note, TextRange(s.note.length),
+                                        )
                                         draft = draft.copy(
                                             note = s.note,
                                             categoryId = if (!isTransfer && s.kind == draft.kind && s.categoryId != null) {
                                                 s.categoryId
                                             } else draft.categoryId,
                                         )
-                                        showSuggestions = false
+                                        // Answered — until the note changes
+                                        // again. Tapping a suggestion does
+                                        // not move focus, so this is the
+                                        // only thing that closes the list.
+                                        noteDismissed = true
                                     }
                                     .padding(horizontal = 12.dp, vertical = 10.dp),
                             )
@@ -622,42 +703,93 @@ fun PlainField(
         value = value,
         onValueChange = onChange,
         singleLine = singleLine,
-        textStyle = MaterialTheme.typography.bodyLarge.copy(
-            color = c.text,
-            textAlign = if (alignEnd) TextAlign.End else TextAlign.Start,
-        ),
+        textStyle = plainTextStyle(alignEnd),
         keyboardOptions = KeyboardOptions(
             keyboardType = if (numeric) KeyboardType.Decimal else KeyboardType.Text
         ),
         cursorBrush = androidx.compose.ui.graphics.SolidColor(c.accent),
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .background(c.surface2)
-            .border(1.dp, c.border, RoundedCornerShape(10.dp))
-            .heightIn(min = 44.dp)
-            .then(
-                if (onFocus != null) Modifier.onFocusChanged { onFocus(it.isFocused) }
-                else Modifier
-            )
-            .padding(horizontal = 12.dp, vertical = 11.dp),
-        decorationBox = { inner ->
-            Box(
-                contentAlignment = if (alignEnd) Alignment.CenterEnd else Alignment.CenterStart,
-            ) {
-                if (value.isEmpty() && placeholder.isNotEmpty()) {
-                    Text(
-                        placeholder,
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = c.faint,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                inner()
-            }
-        },
+        modifier = plainFieldModifier(onFocus),
+        decorationBox = plainDecoration(value.isEmpty(), placeholder, alignEnd),
     )
+}
+
+/**
+ * The same field, holding its own caret.
+ *
+ * Worth the second overload only where something other than typing changes
+ * the text — picking a note from the suggestions, say. The string version
+ * leaves the caret at the offset it had, which after a replacement is
+ * usually the middle of a word.
+ */
+@Composable
+fun PlainField(
+    value: TextFieldValue,
+    placeholder: String = "",
+    numeric: Boolean = false,
+    alignEnd: Boolean = false,
+    singleLine: Boolean = true,
+    onFocus: ((Boolean) -> Unit)? = null,
+    onChange: (TextFieldValue) -> Unit,
+) {
+    val c = LocalTallyColors.current
+    BasicTextField(
+        value = value,
+        onValueChange = onChange,
+        singleLine = singleLine,
+        textStyle = plainTextStyle(alignEnd),
+        keyboardOptions = KeyboardOptions(
+            keyboardType = if (numeric) KeyboardType.Decimal else KeyboardType.Text
+        ),
+        cursorBrush = androidx.compose.ui.graphics.SolidColor(c.accent),
+        modifier = plainFieldModifier(onFocus),
+        decorationBox = plainDecoration(value.text.isEmpty(), placeholder, alignEnd),
+    )
+}
+
+@Composable
+private fun plainTextStyle(alignEnd: Boolean): TextStyle =
+    MaterialTheme.typography.bodyLarge.copy(
+        color = LocalTallyColors.current.text,
+        textAlign = if (alignEnd) TextAlign.End else TextAlign.Start,
+    )
+
+@Composable
+private fun plainFieldModifier(onFocus: ((Boolean) -> Unit)?): Modifier {
+    val c = LocalTallyColors.current
+    return Modifier
+        .fillMaxWidth()
+        .clip(RoundedCornerShape(10.dp))
+        .background(c.surface2)
+        .border(1.dp, c.border, RoundedCornerShape(10.dp))
+        .heightIn(min = 44.dp)
+        .then(
+            if (onFocus != null) Modifier.onFocusChanged { onFocus(it.isFocused) }
+            else Modifier
+        )
+        .padding(horizontal = 12.dp, vertical = 11.dp)
+}
+
+@Composable
+private fun plainDecoration(
+    empty: Boolean,
+    placeholder: String,
+    alignEnd: Boolean,
+): @Composable (@Composable () -> Unit) -> Unit {
+    val c = LocalTallyColors.current
+    return { inner ->
+        Box(contentAlignment = if (alignEnd) Alignment.CenterEnd else Alignment.CenterStart) {
+            if (empty && placeholder.isNotEmpty()) {
+                Text(
+                    placeholder,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = c.faint,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            inner()
+        }
+    }
 }
 
 @Composable

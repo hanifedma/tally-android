@@ -507,6 +507,17 @@ class LedgerRepository(
     /** Called on resume, and after a reconnection. */
     fun refresh() {
         if (closed || local) return
+        // Coming back to the app is the moment to find out whether the socket
+        // survived. Fetching alone would leave the screen correct once and
+        // then frozen — the catch-up has to be paired with putting the
+        // channel back, or "live" means "live as of when you opened it".
+        val ch = channel
+        if (ch == null) {
+            subscribe()
+        } else if (ch.status.value == RealtimeChannel.Status.UNSUBSCRIBED) {
+            unsubscribe()
+            subscribe()
+        }
         scope.launch {
             try {
                 syncNow()
@@ -550,12 +561,42 @@ class LedgerRepository(
         }.launchIn(scope)
 
         realtimeJob = scope.launch {
+            // Every time the channel joins — the first time, and after every
+            // reconnection the library makes on its own when a phone wakes up
+            // or changes network. The rejoin brings back *future* changes;
+            // nothing but this asks for the ones that happened while the
+            // socket was down. Without it the app looks live and is a day
+            // behind. The web gets the same thing from the callback its
+            // subscribe() takes, which fires again on each state change.
+            launch {
+                var joinedOnce = false
+                ch.status.collect { state ->
+                    if (closed) return@collect
+                    when (state) {
+                        RealtimeChannel.Status.SUBSCRIBED -> {
+                            joinedOnce = true
+                            setStatus(if (pendingCount() > 0) Status.SYNCING else Status.LIVE)
+                            try {
+                                syncNow()
+                                flushNow()
+                            } catch (e: Exception) {
+                                reportSyncFailure(e)
+                            }
+                        }
+                        // The socket went. The library will rejoin; saying
+                        // "offline" is what stops the status line claiming
+                        // everything is live while nothing is arriving. Only
+                        // after a first join — a channel starts unsubscribed,
+                        // and "offline" before the first connection would be
+                        // a flash of the wrong word on every launch.
+                        RealtimeChannel.Status.UNSUBSCRIBED ->
+                            if (joinedOnce) setStatus(Status.OFFLINE)
+                        else -> Unit
+                    }
+                }
+            }
             try {
                 ch.subscribe(blockUntilSubscribed = true)
-                setStatus(if (pendingCount() > 0) Status.SYNCING else Status.LIVE)
-                // Anything that happened between the last fetch and the socket
-                // coming up is in neither — ask for it.
-                syncNow()
             } catch (e: Exception) {
                 Log.w(TAG, "Realtime subscribe failed", e)
                 setStatus(Status.OFFLINE)

@@ -209,9 +209,16 @@ fun FieldLabel(text: String) {
 }
 
 @Composable
-fun Help(text: String, modifier: Modifier = Modifier) {
+fun Help(text: String, modifier: Modifier = Modifier, warn: Boolean = false) {
     val c = LocalTallyColors.current
-    Text(text, style = MaterialTheme.typography.labelMedium, color = c.faint, modifier = modifier)
+    // Saying the field cannot be read replaces the help text rather than
+    // appearing under it, so the field never grows a second line.
+    Text(
+        text,
+        style = MaterialTheme.typography.labelMedium,
+        color = if (warn) c.warn else c.faint,
+        modifier = modifier,
+    )
 }
 
 /** The centred "nothing here yet" state, with an optional way out of it. */

@@ -216,10 +216,16 @@ private fun TransactionRowView(tx: TransactionRow, ledger: Ledger, fmt: Fmt, onC
         "expense" -> "−"
         else -> ""
     }
-    // The converted figure only earns its line when it says something new.
-    val converted = if (!tx.isTransfer && tx.currency != ledger.ctx.main) {
-        fmt.t("tx.converted", mapOf("amount" to fmt.money(Money.toMain(tx, ledger.ctx))))
-    } else null
+    // The converted figure only earns its line when it says something new —
+    // and on a transfer the one thing worth saying is what it cost.
+    val converted = when {
+        tx.isTransfer && tx.feeMinor != 0L ->
+            fmt.t("tx.feeOf", mapOf("amount" to fmt.money(tx.feeMinor, tx.currency)))
+        tx.isTransfer -> null
+        tx.currency != ledger.ctx.main ->
+            fmt.t("tx.converted", mapOf("amount" to fmt.money(Money.toMain(tx, ledger.ctx))))
+        else -> null
+    }
 
     Row(
         Modifier

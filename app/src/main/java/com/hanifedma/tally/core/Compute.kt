@@ -9,6 +9,17 @@ import kotlin.math.roundToLong
  */
 object Compute {
 
+    /**
+     * The bucket transfer fees are gathered under in a spending breakdown.
+     *
+     * A fee is spending — the bank kept that money — but it belongs to no
+     * category, and there is no category to make it belong to. Filing it
+     * under "uncategorised" would answer "where did it go?" with a shrug, so
+     * it gets its own slice. Ids everywhere else are UUIDs, so this cannot
+     * collide with a real one.
+     */
+    const val FEE_CATEGORY = "__fee"
+
     data class Totals(val income: Long, val expense: Long) {
         val net: Long get() = income - expense
     }
@@ -63,7 +74,12 @@ object Compute {
                 "income" -> t.accountId?.let { id -> out[id]?.let { out[id] = it + t.amountMinor } }
                 "expense" -> t.accountId?.let { id -> out[id]?.let { out[id] = it - t.amountMinor } }
                 else -> {
-                    t.accountId?.let { id -> out[id]?.let { out[id] = it - t.amountMinor } }
+                    // The fee comes out of the sending account on top of the
+                    // amount, because that is what a bank does: ₩100,000
+                    // moved with a ₩1,000 fee leaves ₩101,000 behind.
+                    t.accountId?.let { id ->
+                        out[id]?.let { out[id] = it - t.amountMinor - t.feeMinor }
+                    }
                     t.toAccountId?.let { id ->
                         out[id]?.let { out[id] = it + (t.toAmountMinor ?: t.amountMinor) }
                     }
@@ -79,6 +95,11 @@ object Compute {
      * Transfers appear in neither figure. Moving your own money between your
      * own accounts is not income and not spending, and counting it as both is
      * exactly why the reference app's monthly totals never matched the bank.
+     *
+     * Their fees do. A fee is not your money changing pockets, it is your
+     * money going to the bank, and leaving it out would be the same mistake
+     * in the other direction: net worth would fall by an amount that appears
+     * in no total and nothing on screen would say why.
      */
     fun totals(rows: List<TransactionRow>, ctx: Money.Ctx): Totals {
         var income = 0L
@@ -87,6 +108,7 @@ object Compute {
             when (t.kind) {
                 "income" -> income += Money.toMain(t, ctx)
                 "expense" -> expense += Money.toMain(t, ctx)
+                else -> expense += Money.feeToMain(t, ctx)
             }
         }
         return Totals(income, expense)
@@ -115,6 +137,16 @@ object Compute {
         val sums = LinkedHashMap<String?, Long>()
         var total = 0L
         for (t in rows) {
+            // Fees are spending, so the expense breakdown has to hold them
+            // or it stops adding up to the expense total sitting above it.
+            if (kind == "expense" && t.kind == "transfer") {
+                val fee = Money.feeToMain(t, ctx)
+                if (fee != 0L) {
+                    sums[FEE_CATEGORY] = (sums[FEE_CATEGORY] ?: 0L) + fee
+                    total += fee
+                }
+                continue
+            }
             if (t.kind != kind) continue
             val v = Money.toMain(t, ctx)
             sums[t.categoryId] = (sums[t.categoryId] ?: 0L) + v
@@ -152,6 +184,13 @@ object Compute {
         val spentByCat = HashMap<String?, Long>()
         var spentTotal = 0L
         for (t in rows) {
+            // A fee counts against the month's overall budget, the same as it
+            // counts in the month's expenses. It belongs to no category, so
+            // it counts against no per-category one.
+            if (t.kind == "transfer") {
+                spentTotal += Money.feeToMain(t, ctx)
+                continue
+            }
             if (t.kind != "expense") continue
             val v = Money.toMain(t, ctx)
             spentTotal += v
@@ -182,6 +221,7 @@ object Compute {
                     when (t.kind) {
                         "income" -> income += Money.toMain(t, ctx)
                         "expense" -> expense += Money.toMain(t, ctx)
+                        else -> expense += Money.feeToMain(t, ctx)
                     }
                 }
                 Day(key, items.sortedWith(newestFirst), income, expense)
@@ -257,7 +297,7 @@ object Compute {
         rows.add(
             listOf(
                 "date", "time", "type", "category", "account", "to_account",
-                "note", "currency", "amount", "rate", ctx.main.lowercase() + "_value",
+                "note", "currency", "amount", "fee", "rate", ctx.main.lowercase() + "_value",
             )
         )
         for (t in transactions.sortedWith(newestFirst)) {
@@ -274,8 +314,17 @@ object Compute {
                     t.note,
                     t.currency,
                     Money.minorToInput(t.amountMinor, t.currency),
+                    if (t.feeMinor != 0L) Money.minorToInput(t.feeMinor, t.currency) else "",
                     trimRate(t.rate),
-                    if (t.isTransfer) "" else Money.minorToInput(Money.toMain(t, ctx), ctx.main),
+                    // A transfer moved nothing in or out, so it has no value
+                    // in this column — except the part of it the bank kept,
+                    // which is spending and has to be here for the column to
+                    // add up to the month's.
+                    if (t.isTransfer) {
+                        if (t.feeMinor != 0L) {
+                            Money.minorToInput(Money.feeToMain(t, ctx), ctx.main)
+                        } else ""
+                    } else Money.minorToInput(Money.toMain(t, ctx), ctx.main),
                 )
             )
         }

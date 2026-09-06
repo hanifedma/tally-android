@@ -83,6 +83,10 @@ data class TransactionRow(
     @SerialName("account_id") val accountId: String? = null,
     @SerialName("to_account_id") val toAccountId: String? = null,
     @SerialName("to_amount_minor") val toAmountMinor: Long? = null,
+    // What the bank kept, in minor units of `currency` — the sending
+    // account's. Only a transfer can carry one; on anything else the fee
+    // *is* the amount.
+    @SerialName("fee_minor") val feeMinor: Long = 0,
     @SerialName("category_id") val categoryId: String? = null,
     val note: String = "",
     @SerialName("occurred_on") val occurredOn: String = Dates.today(),
@@ -106,6 +110,7 @@ data class TransactionRow(
             // row can never be half of each on screen.
             toAccountId = if (k == "transfer") toAccountId else null,
             toAmountMinor = if (k == "transfer") toAmountMinor?.coerceAtLeast(0) else null,
+            feeMinor = if (k == "transfer") feeMinor.coerceAtLeast(0) else 0,
             categoryId = if (k == "transfer") null else categoryId,
             note = note.trim().take(280),
             occurredOn = if (Dates.isDayKey(occurredOn)) occurredOn else Dates.today(),

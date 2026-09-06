@@ -238,7 +238,11 @@ private fun BreakdownCard(
                         .background(category?.let { c.named(it.color) } ?: c.named("gray"))
                 )
                 Text(
-                    (category?.let { it.icon + "  " + it.name }) ?: fmt.t("log.uncategorised"),
+                    when {
+                        category != null -> category.icon + "  " + category.name
+                        slice.categoryId == Compute.FEE_CATEGORY -> "🏦  " + fmt.t("tx.fees")
+                        else -> fmt.t("log.uncategorised")
+                    },
                     style = MaterialTheme.typography.bodyMedium,
                     color = c.text,
                     maxLines = 1,

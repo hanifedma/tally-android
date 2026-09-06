@@ -5,10 +5,15 @@ package com.hanifedma.tally.i18n
 //
 //  Produced from the web app's i18n.js by tools/gen-android-strings.mjs, so
 //  that the phone and the browser cannot disagree about what a button says.
-//  Change the wording there and run the generator; StringsParityTest fails
-//  if this file falls behind.
+//  Change the wording in i18n.js and run the generator again — a few
+//  Android-only strings live in the generator itself, at the top.
 //
-//  270 keys, 2 languages.
+//  Nothing compares this against i18n.js automatically: the web table is
+//  JavaScript and this is a unit test on the JVM. ParityTest checks what it
+//  can from here — that every key exists in both languages and that no
+//  placeholder was lost in translation.
+//
+//  275 keys, 2 languages.
 // ============================================================
 
 object Strings {
@@ -72,7 +77,7 @@ object Strings {
         "migrate.done" to "Copied. Everything is in your account now.",
         "migrate.failed" to "Couldn’t copy it. Nothing was lost — it is still on this device.",
         "setup.h1" to "One setup step is left",
-        "setup.p1" to "Tally is not connected to a database yet. Put your Supabase project URL and anon key into supabase-config.js, then reload.",
+        "setup.p1" to "Tally is not connected to a database yet. Put your Supabase project URL and anon key into supabase.properties and build the app again.",
         "setup.p2" to "Step by step, about ten minutes and free: SETUP.md.",
         "setup.missingUrl" to "Missing: the project URL",
         "setup.missingKey" to "Missing: the anon key",
@@ -180,6 +185,11 @@ object Strings {
         "tx.rateFix" to "Set a rate",
         "tx.receives" to "Receives",
         "tx.receivesHelp" to "The two accounts hold different currencies, so say what actually landed.",
+        "tx.fee" to "Fee",
+        "tx.feeHelp" to "What the bank kept. It leaves the sending account on top of the amount, and counts as spending.",
+        "tx.feeBad" to "That is not a fee Tally can read",
+        "tx.feeOf" to "fee {amount}",
+        "tx.fees" to "Transfer fees",
         "tx.needAmount" to "Enter an amount",
         "tx.needAccount" to "Pick an account",
         "tx.needCategory" to "Pick a category",
@@ -282,13 +292,12 @@ object Strings {
         "err.auth.network" to "No connection — sign-in needs one.",
         "err.auth.generic" to "Sign-in failed. Try again.",
         "err.auth.config" to "Sign-in isn't configured yet. See SETUP.md.",
-        "err.auth.unavailable" to
-            "Google wouldn't sign you in. Check this device has a Google account added, and that the app's sign-in setup is complete.",
         "err.nameTaken" to "You already have one called that.",
         "err.rateBad" to "Enter a number greater than zero.",
         "err.tooMany" to "That is more than Tally can store.",
         "update.ready" to "A new version of Tally is ready.",
         "update.reload" to "Reload",
+        "err.auth.unavailable" to "Google wouldn't sign you in. Check this device has a Google account added, and that the app's sign-in setup is complete.",
     )
 
     private val KO: Map<String, String> = mapOf(
@@ -347,7 +356,7 @@ object Strings {
         "migrate.done" to "복사했습니다. 이제 계정에 모두 들어 있습니다.",
         "migrate.failed" to "복사하지 못했습니다. 내용은 그대로 이 기기에 남아 있습니다.",
         "setup.h1" to "설정이 한 단계 남았습니다",
-        "setup.p1" to "아직 데이터베이스에 연결되지 않았습니다. Supabase 프로젝트 URL과 anon 키를 supabase-config.js에 넣고 새로고침하세요.",
+        "setup.p1" to "아직 데이터베이스에 연결되지 않았습니다. Supabase 프로젝트 URL과 anon 키를 supabase.properties에 넣고 앱을 다시 빌드하세요.",
         "setup.p2" to "자세한 방법은 SETUP.md에 있습니다. 약 10분이면 되고 무료입니다.",
         "setup.missingUrl" to "누락됨: 프로젝트 URL",
         "setup.missingKey" to "누락됨: anon 키",
@@ -455,6 +464,11 @@ object Strings {
         "tx.rateFix" to "환율 설정",
         "tx.receives" to "받는 금액",
         "tx.receivesHelp" to "두 자산의 통화가 달라, 실제로 들어온 금액을 적어 주세요.",
+        "tx.fee" to "수수료",
+        "tx.feeHelp" to "은행이 가져간 금액입니다. 보내는 금액과 별도로 빠져나가고 지출로 잡힙니다.",
+        "tx.feeBad" to "읽을 수 없는 수수료입니다",
+        "tx.feeOf" to "수수료 {amount}",
+        "tx.fees" to "송금 수수료",
         "tx.needAmount" to "금액을 입력하세요",
         "tx.needAccount" to "자산을 선택하세요",
         "tx.needCategory" to "카테고리를 선택하세요",
@@ -557,13 +571,12 @@ object Strings {
         "err.auth.network" to "연결이 없어 로그인할 수 없습니다.",
         "err.auth.generic" to "로그인하지 못했습니다. 다시 시도해 주세요.",
         "err.auth.config" to "로그인이 아직 설정되지 않았습니다. SETUP.md를 참고하세요.",
-        "err.auth.unavailable" to
-            "Google이 로그인을 거부했습니다. 이 기기에 Google 계정이 추가되어 있는지, 로그인 설정이 완료되었는지 확인해 주세요.",
         "err.nameTaken" to "같은 이름이 이미 있습니다.",
         "err.rateBad" to "0보다 큰 숫자를 입력하세요.",
         "err.tooMany" to "Tally가 저장할 수 있는 범위를 넘었습니다.",
         "update.ready" to "새 버전이 준비되었습니다.",
         "update.reload" to "새로고침",
+        "err.auth.unavailable" to "Google이 로그인을 거부했습니다. 이 기기에 Google 계정이 추가되어 있는지, 로그인 설정이 완료되었는지 확인해 주세요.",
     )
 
     private val TABLES: Map<String, Map<String, String>> = mapOf(
