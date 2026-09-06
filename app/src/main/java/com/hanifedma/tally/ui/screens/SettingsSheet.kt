@@ -50,7 +50,7 @@ fun SettingsSheet(
     /** False when there is no project configured to sign in to. */
     canSignIn: Boolean,
     onSignIn: () -> Unit,
-    onErase: () -> Unit,
+    onReset: () -> Unit,
     onSettings: (SettingsRow) -> Unit,
     onManageCategories: () -> Unit,
     onManageAccounts: () -> Unit,
@@ -115,6 +115,14 @@ fun SettingsSheet(
             LinkRow("🎯", fmt.t("bud.title"), null, onBudgets)
             Spacer(Modifier.height(8.dp))
             LinkRow("📄", fmt.t("set.export"), fmt.t("set.exportHelp"), onExport)
+            Spacer(Modifier.height(8.dp))
+            // Destructive, and in Data rather than down with the account:
+            // what it destroys is the data. A device-only ledger used to
+            // carry its own erase button below; two buttons that wipe the
+            // same ledger, in different sections under different names, is
+            // a question about which one is worse asked of someone who is
+            // already nervous.
+            LinkRow("🗑", fmt.t("reset.title"), fmt.t("reset.help"), onReset, danger = true)
 
             if (local) {
                 Section(fmt.t("local.title"))
@@ -124,16 +132,6 @@ fun SettingsSheet(
                     GhostButton(fmt.t("local.signIn"), Modifier.fillMaxWidth(), onClick = onSignIn)
                     Help(fmt.t("local.signInHelp"), Modifier.padding(top = 6.dp))
                 }
-                Spacer(Modifier.height(10.dp))
-                // Marked destructive: it sits in exactly the place "Sign out"
-                // does for a signed-in account, and erasing a ledger for ever
-                // must not look identical to leaving one behind.
-                GhostButton(
-                    fmt.t("local.erase"),
-                    Modifier.fillMaxWidth(),
-                    danger = true,
-                    onClick = onErase,
-                )
             } else {
                 Section(fmt.t("set.account"))
                 if (email != null) {
@@ -168,14 +166,26 @@ private fun Section(title: String) {
 }
 
 @Composable
-private fun LinkRow(glyph: String, label: String, sublabel: String?, onClick: () -> Unit) {
+private fun LinkRow(
+    glyph: String,
+    label: String,
+    sublabel: String?,
+    onClick: () -> Unit,
+    /**
+     * Destroys something. Coloured rather than filled — it has to be
+     * unmistakable among the ordinary rows without reading as the primary
+     * action of the sheet, which it is the opposite of — and it loses the
+     * chevron, which promises somewhere to go rather than something to lose.
+     */
+    danger: Boolean = false,
+) {
     val c = LocalTallyColors.current
     Row(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
-            .background(c.surface2)
-            .border(1.dp, c.border, RoundedCornerShape(10.dp))
+            .background(if (danger) c.dangerSoft else c.surface2)
+            .border(1.dp, if (danger) c.danger else c.border, RoundedCornerShape(10.dp))
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -186,7 +196,7 @@ private fun LinkRow(glyph: String, label: String, sublabel: String?, onClick: ()
             Text(
                 label,
                 style = MaterialTheme.typography.bodyLarge,
-                color = c.text,
+                color = if (danger) c.danger else c.text,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -194,12 +204,15 @@ private fun LinkRow(glyph: String, label: String, sublabel: String?, onClick: ()
                 Text(
                     sublabel,
                     style = MaterialTheme.typography.labelMedium,
-                    color = c.faint,
-                    maxLines = 1,
+                    color = if (danger) c.danger else c.faint,
+                    // Two lines here: the destructive row's subtitle is the
+                    // one sentence that has to be read, and clipping it at
+                    // one line is where the warning would go missing.
+                    maxLines = if (danger) 2 else 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
         }
-        Text("›", color = c.faint, fontSize = 18.sp)
+        if (!danger) Text("›", color = c.faint, fontSize = 18.sp)
     }
 }

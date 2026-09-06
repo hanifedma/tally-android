@@ -7,6 +7,7 @@ import com.hanifedma.tally.core.BudgetRow
 import com.hanifedma.tally.core.CategoryRow
 import com.hanifedma.tally.core.Ids
 import com.hanifedma.tally.core.Ledger
+import com.hanifedma.tally.core.Money
 import com.hanifedma.tally.core.SEED_ACCOUNTS
 import com.hanifedma.tally.core.SEED_CATEGORIES
 import com.hanifedma.tally.core.SettingsRow
@@ -829,6 +830,82 @@ class LedgerRepository(
                     )
                 }
             }
+            saveCache()
+            saveOutbox()
+            publish()
+            flush()
+        } finally {
+            seeding = false
+        }
+    }
+
+    /**
+     * Put the account back to its first day.
+     *
+     * Every transaction, budget, account and category goes; the starting set
+     * is rebuilt; the money settings return to their defaults. What survives
+     * is the account itself and the two things that belong to the person
+     * rather than the ledger — the theme and the language. Resetting those
+     * would hand someone back an English app in a colour scheme they did not
+     * choose, which is not what "start over" is being asked for.
+     *
+     * Tombstones, not deletes, for the same reason the rest of this file
+     * never really deletes: a row that is gone still has to reach the other
+     * devices, and only an UPDATE carries the user_id that row level
+     * security needs before it will let the change through.
+     */
+    fun resetAll() {
+        seeding = true
+        try {
+            // Settings first, and through the field rather than
+            // enqueueSettings: that helper re-denominates and re-translates
+            // the starter accounts as a side effect, and it would be doing
+            // it to the rows this function is one line away from replacing.
+            settings = settings.copy(
+                mainCurrency = Money.DEFAULT_CURRENCY,
+                weekStart = 1,
+                monthStart = 1,
+                rates = JsonObject(emptyMap()),
+            ).normalized()
+            haveSettings = true
+            if (!local) settingsPending = settings.copy(userId = uid, updatedAt = null)
+
+            val stamp = nowIso()
+            transactions.live().forEach { transactions.enqueue(it.copy(deletedAt = stamp)) }
+            budgets.live().forEach { budgets.enqueue(it.copy(deletedAt = stamp)) }
+            accounts.live().forEach { accounts.enqueue(it.copy(deletedAt = stamp)) }
+            categories.live().forEach { categories.enqueue(it.copy(deletedAt = stamp)) }
+
+            // Then the starting set, at the ids this account derives for
+            // itself — the same ids just buried above. That collision is the
+            // point: the outbox is keyed by row, so a starter goes up once,
+            // as itself, rather than as a deletion followed by an insert.
+            val lang = settings.lang
+            SEED_CATEGORIES.forEachIndexed { i, seed ->
+                categories.enqueue(
+                    CategoryRow(
+                        id = Ids.derived(uid, "category:${seed.slug}"),
+                        name = seed.name(lang),
+                        kind = seed.kind,
+                        icon = seed.icon,
+                        color = seed.color,
+                        position = i,
+                    )
+                )
+            }
+            SEED_ACCOUNTS.forEachIndexed { i, seed ->
+                accounts.enqueue(
+                    AccountRow(
+                        id = Ids.derived(uid, "account:${seed.slug}"),
+                        name = seed.name(lang),
+                        kind = seed.kind,
+                        currency = settings.mainCurrency,
+                        color = seed.color,
+                        position = i,
+                    )
+                )
+            }
+
             saveCache()
             saveOutbox()
             publish()

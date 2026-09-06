@@ -561,13 +561,25 @@ private fun SheetContent(
                 vm.leaveLocal()
             },
             // The one action in the app that cannot be undone by any means.
-            onErase = {
+            // Counted rather than hand-waved: someone about to lose four
+            // years of entries and someone about to lose an afternoon's are
+            // owed different amounts of pause, and the only honest way to
+            // give it is to say the number out loud.
+            onReset = {
                 onConfirm(
                     Confirm(
-                        title = fmt.t("local.eraseConfirm"),
-                        body = fmt.t("local.eraseBody"),
-                        confirmLabel = fmt.t("local.erase"),
-                    ) { onCloseAll(); vm.eraseLocal() }
+                        title = fmt.t("reset.confirm"),
+                        body = fmt.t(
+                            if (vm.ui.value.local) "reset.bodyLocal" else "reset.body",
+                            mapOf(
+                                "tx" to ledger.transactions.size,
+                                "acc" to ledger.accounts.size,
+                                "cat" to ledger.categories.size,
+                                "bud" to ledger.budgets.size,
+                            ),
+                        ),
+                        confirmLabel = fmt.t("reset.confirmLabel"),
+                    ) { onCloseAll(); vm.resetAll() }
                 )
             },
             onSettings = { next ->

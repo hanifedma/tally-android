@@ -202,6 +202,33 @@ class TallyViewModel(app: Application) : AndroidViewModel(app) {
         if (Supabase.isConfigured) watchAccount()
     }
 
+    /**
+     * Back to a first day, whichever kind of ledger this is.
+     *
+     * A device-only one has nowhere to send a tombstone and no other reader
+     * to convince, so the cache goes and it seeds itself again — the same
+     * destination by a shorter road, and without leaving thousands of
+     * tombstones behind for nobody. A signed-in one has to say what happened
+     * out loud, so every row is buried in place and the starting set written
+     * back over it.
+     */
+    fun resetAll() {
+        if (_ui.value.local) {
+            eraseLocal()
+            return
+        }
+        val repository = repo ?: return
+        viewModelScope.launch {
+            try {
+                repository.resetAll()
+                showMessage("reset.done")
+            } catch (e: Exception) {
+                Log.w("TallyViewModel", "Couldn't finish the reset", e)
+                showMessage("reset.failed", isError = true)
+            }
+        }
+    }
+
     /** Throw away the device-only ledger and start again, still local. */
     fun eraseLocal() {
         viewModelScope.launch {
