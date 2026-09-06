@@ -498,7 +498,44 @@ private fun SheetContent(
         // on the first tap, which the web app has never done.
         is Sheet.EditAccount -> AccountEditorSheet(
             ledger, fmt, sheet.account,
-            onSave = { repo?.put(it); onClose() },
+            onSave = { account ->
+                val was = sheet.account
+                val filed = if (was != null && was.currency != account.currency) {
+                    ledger.transactions.count {
+                        it.accountId == account.id || it.toAccountId == account.id
+                    }
+                } else 0
+                // Changing the currency of an account that already holds
+                // money converts nothing: a balance adds minor units on the
+                // promise that a transaction is always in its account's
+                // currency, so ₩500,000 relabelled as rupiah becomes
+                // Rp500,000 while the rows underneath still say ₩. Sometimes
+                // that is exactly what someone wants — they filed a month
+                // under the wrong flag — so it is a question rather than a
+                // refusal, asked with both numbers in it.
+                if (was != null && filed > 0) {
+                    val bal = Compute.balances(ledger.accounts, ledger.transactions)[account.id] ?: 0L
+                    onConfirm(
+                        Confirm(
+                            title = fmt.t("acc.currencyConfirm", mapOf("to" to account.currency)),
+                            body = fmt.t(
+                                "acc.currencyBody",
+                                mapOf(
+                                    "n" to filed,
+                                    "from" to was.currency,
+                                    "to" to account.currency,
+                                    "was" to fmt.money(bal, was.currency),
+                                    "now" to fmt.money(bal, account.currency),
+                                ),
+                            ),
+                            confirmLabel = fmt.t("acc.currencyKeep"),
+                        ) { repo?.put(account); onClose() }
+                    )
+                } else {
+                    repo?.put(account)
+                    onClose()
+                }
+            },
             onDelete = { account ->
                 val n = ledger.transactions.count {
                     it.accountId == account.id || it.toAccountId == account.id

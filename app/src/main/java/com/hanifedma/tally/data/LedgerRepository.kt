@@ -713,14 +713,14 @@ class LedgerRepository(
      * fact about that money and not a preference: [Compute.balances]
      * adds minor units without converting, on the promise that a transaction
      * is always in its account's currency. So this runs only for a ledger
-     * with no transactions at all — tombstones included, since a delete can
-     * still be undone — whose accounts are all untouched starters holding
-     * nothing.
+     * with no live transactions, whose accounts are all untouched starters
+     * holding nothing — which is true of a new account and of one just
+     * started over.
      */
     private fun retuneStarterAccounts(from: String, to: String) {
         val all = accounts.rows.values.toList()
         val starters = SEED_ACCOUNTS.map { Ids.derived(uid, "account:${it.slug}") }.toSet()
-        if (!startersMayFollow(all, transactions.rows.size, starters, from)) return
+        if (!startersMayFollow(all, transactions.rows.values.toList(), starters, from)) return
         all.filter { it.deletedAt == null }
             .forEach { accounts.enqueue(it.copy(currency = to)) }
     }
