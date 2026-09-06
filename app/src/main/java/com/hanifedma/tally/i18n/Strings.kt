@@ -8,7 +8,7 @@ package com.hanifedma.tally.i18n
 //  Change the wording there and run the generator; StringsParityTest fails
 //  if this file falls behind.
 //
-//  269 keys, 2 languages.
+//  270 keys, 2 languages.
 // ============================================================
 
 object Strings {
@@ -38,13 +38,6 @@ object Strings {
         "login.sub" to "One ledger for every account and every currency — on your phone and your laptop at the same time.",
         "login.google" to "Continue with Google",
         "login.wait" to "Getting sign-in ready…",
-        "login.privacy" to "Your ledger is yours. Nobody else can read it.",
-        "login.f1" to "Real-time on every device",
-        "login.f1sub" to "Enter it on your phone, it is on your laptop before you look up.",
-        "login.f2" to "Won and rupiah, side by side",
-        "login.f2sub" to "Every account keeps its own currency; the totals still add up.",
-        "login.f3" to "Budgets that follow your payday",
-        "login.f3sub" to "Set the month to start on the day you are actually paid.",
         "login.or" to "or",
         "login.local" to "Use without an account",
         "login.localSub" to "Everything stays on this device. You can sign in later and bring it with you.",
@@ -320,13 +313,6 @@ object Strings {
         "login.sub" to "모든 계좌와 모든 통화를 한 장부에. 휴대폰과 노트북에서 동시에.",
         "login.google" to "Google로 계속하기",
         "login.wait" to "로그인을 준비하는 중…",
-        "login.privacy" to "내 장부는 나만 볼 수 있습니다.",
-        "login.f1" to "모든 기기에서 실시간",
-        "login.f1sub" to "휴대폰에 입력하면 노트북에 바로 나타납니다.",
-        "login.f2" to "원과 루피아를 나란히",
-        "login.f2sub" to "계좌마다 통화를 그대로 두어도 합계는 맞습니다.",
-        "login.f3" to "월급날에 맞춘 예산",
-        "login.f3sub" to "달의 시작일을 실제 월급날로 정할 수 있습니다.",
         "login.or" to "또는",
         "login.local" to "로그인 없이 사용하기",
         "login.localSub" to "모든 내용이 이 기기에만 저장됩니다. 나중에 로그인하면 그대로 가져갈 수 있습니다.",

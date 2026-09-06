@@ -114,23 +114,14 @@ fun LoginScreen(vm: TallyViewModel, fmt: Fmt, signingIn: Boolean, dark: Boolean)
             modifier = Modifier.widthIn(max = 340.dp),
         )
 
+        // Theme and language, and nothing else. The three feature blurbs
+        // that used to sit here were an advertisement on a screen reached
+        // by people who have already decided.
         Spacer(Modifier.height(34.dp))
-        Feature("⚡", fmt.t("login.f1"), fmt.t("login.f1sub"))
-        Feature("💱", fmt.t("login.f2"), fmt.t("login.f2sub"))
-        Feature("🗓", fmt.t("login.f3"), fmt.t("login.f3sub"))
-
-        Spacer(Modifier.height(28.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             SmallChip(if (dark) "☀️" else "🌙") { vm.toggleTheme() }
             SmallChip(if (fmt.lang == "ko") "EN" else "한국어") { vm.toggleLang() }
         }
-        Spacer(Modifier.height(18.dp))
-        Text(
-            fmt.t("login.privacy"),
-            style = MaterialTheme.typography.labelMedium,
-            color = c.faint,
-            textAlign = TextAlign.Center,
-        )
         Spacer(Modifier.height(24.dp))
     }
 }
@@ -238,26 +229,6 @@ private fun GhostButton(label: String, onClick: () -> Unit) {
             fontWeight = FontWeight.SemiBold,
             color = c.text,
         )
-    }
-}
-
-@Composable
-private fun Feature(glyph: String, title: String, body: String) {
-    val c = LocalTallyColors.current
-    Row(
-        Modifier.fillMaxWidth().padding(bottom = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Text(glyph, fontSize = 18.sp, modifier = Modifier.width(24.dp))
-        Column {
-            Text(
-                title,
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.SemiBold,
-                color = c.text,
-            )
-            Text(body, style = MaterialTheme.typography.bodyMedium, color = c.muted)
-        }
     }
 }
 
