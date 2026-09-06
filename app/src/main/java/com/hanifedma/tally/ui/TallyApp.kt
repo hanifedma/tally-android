@@ -521,7 +521,6 @@ private fun SheetContent(
                             body = fmt.t(
                                 "acc.currencyBody",
                                 mapOf(
-                                    "n" to filed,
                                     "from" to was.currency,
                                     "to" to account.currency,
                                     "was" to fmt.money(bal, was.currency),
