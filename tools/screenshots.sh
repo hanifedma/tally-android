@@ -58,6 +58,36 @@ tap_text() {
   sleep 3
 }
 
+# Every clickable node's bounds, one "x1 y1 x2 y2" per line, in tree order.
+clickables() {
+  ui | tr '>' '\n' | grep 'clickable="true"' \
+     | grep -oE 'bounds="\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]"' \
+     | grep -oE '[0-9]+' | paste - - - -
+}
+
+# The two buttons with neither text nor a content description: the menu, top
+# right, and the add button, bottom right. Compose gives them no semantics to
+# search for, so they are found by where they are — but "where" is read from
+# the hierarchy, not guessed from a percentage of the screen, which is how
+# this used to miss the button and photograph the screen behind it.
+tap_corner() {
+  local want="$1" line best bx by
+  best=""
+  while read -r x1 y1 x2 y2; do
+    if [ "$want" = "top" ] && [ "$y1" -lt 300 ]; then
+      if [ -z "$best" ] || [ "$x1" -gt "$bx" ]; then best="$x1 $y1 $x2 $y2"; bx=$x1; fi
+    elif [ "$want" = "bottom" ] && [ "$y1" -gt 1000 ]; then
+      if [ -z "$best" ] || [ "$y1" -gt "$by" ]; then best="$x1 $y1 $x2 $y2"; by=$y1; fi
+    fi
+  done <<EOF
+$(clickables)
+EOF
+  if [ -z "$best" ]; then echo "  !! no $want-corner button" >&2; return 1; fi
+  set -- $best
+  $ADB shell input tap $(( ($1 + $3) / 2 )) $(( ($2 + $4) / 2 ))
+  sleep 3
+}
+
 # Replace the device ledger and restart the app on it.
 seed() {
   $ADB shell am force-stop $PKG
@@ -73,16 +103,22 @@ $ADB install -r -g "$ROOT/app/build/outputs/apk/debug/app-debug.apk" >/dev/null 
 
 say "Generating the demo ledger"
 ( cd "$ROOT/../tally" && node tools/demo-cache.mjs "$WORK/cache.json" ) || exit 1
-sed 's/"theme": "dark"/"theme": "light"/' "$WORK/cache.json" > "$WORK/cache-light.json"
-sed 's/"lang": "en"/"lang": "ko"/'        "$WORK/cache.json" > "$WORK/cache-ko.json"
+# One variant, not two. Light and Korean are each one screen's worth of
+# difference on a screen the gallery already shows twice; photographed
+# together they cost one picture instead of two and say the same thing.
+sed -e 's/"theme": "dark"/"theme": "light"/' -e 's/"lang": "en"/"lang": "ko"/' \
+    "$WORK/cache.json" > "$WORK/cache-ko-light.json"
 
 say "First run, nothing stored"
 $ADB shell pm clear $PKG >/dev/null
 $ADB shell am start -n $PKG/.MainActivity >/dev/null 2>&1
-shot "setup" 7
+# The sign-in screen on a configured build; the short setup screen on one
+# built without supabase.properties. Either way it is the first thing anyone
+# sees, which is what the README calls it.
+shot "login" 8
 
 say "One tap in, with no account"
-tap_text "Use it on this device only" || tap_text "without an account"
+tap_text "Use without an account" || tap_text "Use it on this device only"
 sleep 2
 
 say "A month of transactions"
@@ -95,26 +131,20 @@ tap_text "Accounts" && shot "accounts" 3
 tap_text "Log"      && sleep 2
 
 say "The editor"
-# The add button, bottom right, in the FAB's usual place.
-$ADB shell input tap $(( $($ADB shell wm size | grep -oE '[0-9]+x' | tr -d x) * 88 / 100 )) \
-                    $(( $($ADB shell wm size | grep -oE 'x[0-9]+' | tr -d x) * 89 / 100 ))
+tap_corner bottom
 shot "editor" 5
 $ADB shell input keyevent KEYCODE_BACK
 sleep 3
 
-say "Settings, at the device-only section"
-tap_text "☰" || true
-sleep 4
-for _ in 1 2 3 4 5 6; do $ADB shell input swipe 540 1800 540 800 200; done
-shot "settings" 3
+say "Settings"
+tap_corner top
+shot "settings" 4
 $ADB shell input keyevent KEYCODE_BACK
 sleep 3
 
-say "Light, then Korean"
-seed "$WORK/cache-light.json"
-shot "log-light" 2
-seed "$WORK/cache-ko.json"
-shot "log-korean" 2
+say "Korean, in light"
+seed "$WORK/cache-ko-light.json"
+shot "log-korean-light" 3
 
 say "Leaving the demo ledger in place"
 seed "$WORK/cache.json"

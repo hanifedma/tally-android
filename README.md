@@ -14,13 +14,15 @@ Web app: [hanifedma/tally](https://github.com/hanifedma/tally)
 </p>
 <p align="center">
   <img src="docs/screenshots/editor.png" width="240" alt="Adding a transaction, with a calculator in the amount field" />
-  <img src="docs/screenshots/log-light.png" width="240" alt="The same screen in light mode" />
-  <img src="docs/screenshots/log-korean.png" width="240" alt="The same screen in Korean" />
+  <img src="docs/screenshots/settings.png" width="240" alt="Settings: theme, language, main currency, and a way back to an empty ledger" />
+  <img src="docs/screenshots/log-korean-light.png" width="240" alt="The log again, this time in Korean and in light mode" />
 </p>
 
 <p align="center"><sub>
-Taken on a Galaxy A15 (Android 14) by <a href="tools/screenshots.sh">tools/screenshots.sh</a>.
-The ledger in them is the one the
+Six screens, six different things — the last one carries both the light theme
+and the Korean translation rather than spending a picture on each.
+Taken by <a href="tools/screenshots.sh">tools/screenshots.sh</a>. The ledger in
+them is the one the
 <a href="https://github.com/hanifedma/tally#readme">web screenshots</a> use, so
 the two can be compared row by row — the same ₩260,768 of expenses, the same
 ₩13,139,252 of net worth, arrived at by two separate implementations.
@@ -68,8 +70,7 @@ This is also the only way in on a phone with no Google Play Services, where
 Credential Manager cannot offer an account at all.
 
 <p align="center">
-  <img src="docs/screenshots/setup.png" width="240" alt="First run: a way in that needs no project and no account" />
-  <img src="docs/screenshots/settings.png" width="240" alt="Settings, saying plainly that this ledger is on this device only" />
+  <img src="docs/screenshots/login.png" width="240" alt="First run: sign in with Google, or use the app with no account at all" />
 </p>
 
 ## Setup
@@ -83,7 +84,7 @@ Supabase project and one Google OAuth client serve both apps.
 ```bash
 ./gradlew assembleRelease     # app/build/outputs/apk/release/app-release.apk
 ./gradlew installDebug        # onto a connected device or emulator
-./gradlew test                # 45 unit tests, no device needed
+./gradlew test                # 56 unit tests, no device needed
 ./gradlew connectedAndroidTest  # the screen tests; needs a device
 ./tools/screenshots.sh        # docs/screenshots/; needs a device
 ```
@@ -118,11 +119,21 @@ It is produced from the web app's `i18n.js`:
 cd ../tally && node tools/gen-android-strings.mjs ../tally-android
 ```
 
-Two hand-maintained copies of two hundred and forty strings drift within a
+Two hand-maintained copies of nearly three hundred strings drift within a
 week — a key renamed on one side and the phone quietly starts showing
 `tx.saveAnother` where a button should be. So the web table is the source and
-this is a build artefact that happens to be committed. `ParityTest` fails if it
-falls behind, or if either language is missing a key or a `{placeholder}`.
+this is a build artefact that happens to be committed.
+
+The handful of strings only the phone says — one names a file that exists only
+in this repo, one names a failure only Credential Manager can have — live at
+the top of the generator, not pencilled into `Strings.kt` afterwards, where
+the next run would silently delete them.
+
+Nothing checks this file against `i18n.js` automatically: that table is
+JavaScript and these tests run on the JVM. `ParityTest` checks what it can from
+this side — that every key exists in both languages, and that no
+`{placeholder}` was lost in translation. Falling behind `i18n.js` is caught by
+running the generator, not by a test.
 
 ### The parity tests
 
