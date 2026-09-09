@@ -62,40 +62,40 @@ class ParityTest {
 
     @Test
     fun `amounts are formatted exactly as the web formats them`() {
-        assertEquals("₩755,297", Money.format(755297, "KRW", Locale.US))
-        assertEquals("−₩427,726", Money.format(-427726, "KRW", Locale.US))
-        assertEquals("Rp118,200", Money.format(118200, "IDR", Locale.US))
-        assertEquals("$12.40", Money.format(1240, "USD", Locale.US))
-        assertEquals("120,000 ₫", Money.format(120000, "VND", Locale.US))
+        assertEquals("₩755,297", Money.format(755297000, "KRW", Locale.US))
+        assertEquals("−₩427,726", Money.format(-427726000, "KRW", Locale.US))
+        assertEquals("Rp118,200", Money.format(118200000, "IDR", Locale.US))
+        assertEquals("$12.40", Money.format(12400, "USD", Locale.US))
+        assertEquals("120,000 ₫", Money.format(120000000, "VND", Locale.US))
         assertEquals("₩0", Money.format(0, "KRW", Locale.US))
     }
 
     @Test
     fun `a negative uses a real minus sign`() {
-        val s = Money.format(-427726, "KRW", Locale.US)
+        val s = Money.format(-427726000, "KRW", Locale.US)
         assertTrue("should not contain an ASCII hyphen", !s.contains("-"))
         assertTrue(s.startsWith("−"))
     }
 
     @Test
     fun `signs`() {
-        assertEquals("+₩500", Money.format(500, "KRW", Locale.US, Money.Sign.ALWAYS))
-        assertEquals("−₩500", Money.format(-500, "KRW", Locale.US, Money.Sign.ALWAYS))
-        assertEquals("₩500", Money.format(-500, "KRW", Locale.US, Money.Sign.NEVER))
+        assertEquals("+₩500", Money.format(500000, "KRW", Locale.US, Money.Sign.ALWAYS))
+        assertEquals("−₩500", Money.format(-500000, "KRW", Locale.US, Money.Sign.ALWAYS))
+        assertEquals("₩500", Money.format(-500000, "KRW", Locale.US, Money.Sign.NEVER))
         assertEquals("₩0", Money.format(0, "KRW", Locale.US, Money.Sign.ALWAYS))
     }
 
     @Test
     fun `compact form matches`() {
-        assertEquals("₩8,400", Money.formatCompact(8400, "KRW", Locale.US))
-        assertEquals("₩755K", Money.formatCompact(755297, "KRW", Locale.US))
-        assertEquals("₩2.3M", Money.formatCompact(2260452, "KRW", Locale.US))
-        assertEquals("−₩2.3M", Money.formatCompact(-2260452, "KRW", Locale.US))
+        assertEquals("₩8,400", Money.formatCompact(8400000, "KRW", Locale.US))
+        assertEquals("₩755K", Money.formatCompact(755297000, "KRW", Locale.US))
+        assertEquals("₩2.3M", Money.formatCompact(2260452000, "KRW", Locale.US))
+        assertEquals("−₩2.3M", Money.formatCompact(-2260452000, "KRW", Locale.US))
     }
 
     @Test
     fun `an unknown currency still formats`() {
-        assertEquals("12.34", Money.format(1234, "XYZ", Locale.US))
+        assertEquals("12.34", Money.format(12340, "XYZ", Locale.US))
     }
 
     // ------------------------------------------------------------
@@ -139,19 +139,53 @@ class ParityTest {
 
     @Test
     fun `amounts become whole minor units`() {
-        assertEquals(12000L, Money.parseToMinor("12000", "KRW"))
-        assertEquals(1240L, Money.parseToMinor("12.40", "USD"))
-        assertEquals(1235L, Money.parseToMinor("12.345", "USD"))
-        assertEquals(118200L, Money.parseToMinor("118200.4", "IDR"))
-        assertEquals(500L, Money.parseToMinor("-500", "KRW"))
-        assertEquals(15400L, Money.parseToMinor("12000+3400", "KRW"))
+        assertEquals(12000000L, Money.parseToMinor("12000", "KRW"))
+        assertEquals(12400L, Money.parseToMinor("12.40", "USD"))
+        assertEquals(12345L, Money.parseToMinor("12.345", "USD"))
+        assertEquals(500000L, Money.parseToMinor("-500", "KRW"))
+        assertEquals(15400000L, Money.parseToMinor("12000+3400", "KRW"))
         assertNull(Money.parseToMinor("1e20", "KRW"))
         assertNull(Money.parseToMinor("", "KRW"))
     }
 
     @Test
+    fun `rupiah keeps its fractions now, and rounds at the fourth place`() {
+        // The whole point of the change: a rupiah is no longer the smallest
+        // thing Tally can count.
+        assertEquals(5000553L, Money.parseToMinor("5000.553", "IDR"))
+        assertEquals(883L, Money.parseToMinor("0.883", "IDR"))
+        assertEquals(118200400L, Money.parseToMinor("118200.4", "IDR"))
+        assertEquals(1000L, Money.parseToMinor("1.0004", "IDR"))
+        assertEquals(1001L, Money.parseToMinor("1.0005", "IDR"))
+    }
+
+    @Test
+    fun `a currency's decimals are a floor, not a width`() {
+        assertEquals("Rp5,000.553", Money.format(5000553, "IDR", Locale.US))
+        assertEquals("Rp0.883", Money.format(883, "IDR", Locale.US))
+        assertEquals("Rp5,000.5", Money.format(5000500, "IDR", Locale.US))
+        assertEquals("$12.405", Money.format(12405, "USD", Locale.US))
+        assertEquals("$12.00", Money.format(12000, "USD", Locale.US))
+    }
+
+    @Test
+    fun `the amount field is not padded with zeros it does not need`() {
+        assertEquals("118200", Money.minorToInput(118200000, "IDR"))
+        assertEquals("0", Money.minorToInput(0, "KRW"))
+        assertEquals("5000.553", Money.minorToInput(5000553, "IDR"))
+        assertEquals("5000.5", Money.minorToInput(5000500, "IDR"))
+        assertEquals("12.40", Money.minorToInput(12400, "USD"))
+        assertEquals("12.405", Money.minorToInput(12405, "USD"))
+        assertEquals("-20000", Money.minorToInput(-20000000, "KRW"))
+    }
+
+    @Test
     fun `minorToInput round-trips`() {
-        for ((minor, code) in listOf(755297L to "KRW", 1240L to "USD", 118200L to "IDR", 5L to "USD")) {
+        val cases = listOf(
+            755297000L to "KRW", 12400L to "USD", 118200000L to "IDR", 5L to "USD",
+            5000553L to "IDR", 883L to "IDR", 12405L to "USD",
+        )
+        for ((minor, code) in cases) {
             assertEquals(code, minor, Money.parseToMinor(Money.minorToInput(minor, code), code))
         }
     }
@@ -257,28 +291,28 @@ class ParityTest {
 
     @Test
     fun `conversion matches the web to the unit`() {
-        assertEquals(12400L, Money.toMain(tx(12400, "KRW"), ctx))
-        assertEquals(10343L, Money.toMain(tx(118200, "IDR", 0.0875), ctx))
-        assertEquals(17112L, Money.toMain(tx(1240, "USD", 1380.0), ctx))
-        assertEquals(6341L, Money.convertMinor(1000000, "IDR", "USD", ctx))
-        assertEquals(500L, Money.convertMinor(500, "KRW", "KRW", ctx))
+        assertEquals(12400000L, Money.toMain(tx(12400000, "KRW"), ctx))
+        assertEquals(10342500L, Money.toMain(tx(118200000, "IDR", 0.0875), ctx))
+        assertEquals(17112000L, Money.toMain(tx(12400, "USD", 1380.0), ctx))
+        assertEquals(63406L, Money.convertMinor(1000000000, "IDR", "USD", ctx))
+        assertEquals(500000L, Money.convertMinor(500000, "KRW", "KRW", ctx))
     }
 
     @Test
     fun `an old row keeps the price it was recorded at`() {
-        val old = tx(100000, "IDR", 0.09)
+        val old = tx(100000000, "IDR", 0.09)
         val now = Money.Ctx("KRW", mapOf("IDR" to 0.07))
-        assertEquals(9000L, Money.toMain(old, now))
+        assertEquals(9000000L, Money.toMain(old, now))
     }
 
     @Test
     fun `changing the main currency re-expresses old rows through settings`() {
-        val row = tx(100000, "IDR", 0.0875)
+        val row = tx(100000000, "IDR", 0.0875)
         val usd = Money.Ctx("USD", mapOf("KRW" to 1.0 / 1380, "IDR" to 0.0875 / 1380))
-        // 8,750 KRW at 1,380 to the dollar is $6.34, give or take a cent of
-        // rounding in either implementation.
+        // 8,750 KRW at 1,380 to the dollar is $6.34, give or take a thousandth
+        // of rounding in either implementation.
         val cents = Money.toMain(row, usd)
-        assertTrue("expected about 634, got " + cents, cents in 633L..635L)
+        assertTrue("expected about 6340, got " + cents, cents in 6330L..6350L)
     }
 
     @Test
@@ -523,8 +557,8 @@ class ParityTest {
 
     @Test
     fun `a budget set in another currency is converted`() {
-        val budgets = listOf(BudgetRow(id = "b", amountMinor = 100, currency = "USD"))
-        assertEquals(1380L, Compute.budgetProgress(budgets, emptyList(), emptyList(), ctx)[0].limit)
+        val budgets = listOf(BudgetRow(id = "b", amountMinor = 1000, currency = "USD"))
+        assertEquals(1380000L, Compute.budgetProgress(budgets, emptyList(), emptyList(), ctx)[0].limit)
     }
 
     // ------------------------------------------------------------
@@ -626,7 +660,7 @@ class ParityTest {
     fun `the CSV escapes anything that would break a column`() {
         val categories = listOf(CategoryRow(id = "c1", name = "Food, \"real\"", kind = "expense"))
         val rows = listOf(
-            tx(118200, "IDR", 0.0875, id = "1", accountId = "a2", categoryId = "c1",
+            tx(118200000, "IDR", 0.0875, id = "1", accountId = "a2", categoryId = "c1",
                 note = "He said \"hi\", then left", occurredMin = 725)
         )
         val csv = Compute.toCsv(rows, accounts, categories, ctx)
@@ -636,7 +670,7 @@ class ParityTest {
         assertTrue(lines[1].contains("\"He said \"\"hi\"\", then left\""))
         assertTrue(lines[1].contains("\"Food, \"\"real\"\"\""))
         assertTrue(lines[1].startsWith("2026-08-30,12:05,expense,"))
-        assertTrue(lines[1].endsWith(",10343"))
+        assertTrue(lines[1], lines[1].endsWith(",10342.5"))
     }
 
     // ------------------------------------------------------------

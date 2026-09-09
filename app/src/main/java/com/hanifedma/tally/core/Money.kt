@@ -23,10 +23,13 @@ object Money {
     data class Currency(val symbol: String, val decimals: Int, val en: String, val ko: String)
 
     /**
-     * `decimals` is what Tally shows, which is not always what the standard
-     * says: IDR is formally two-decimal and nobody has priced anything in sen
-     * for decades. Must match money.js exactly — it is the scale of every
-     * amount already stored.
+     * `decimals` is the *fewest* places Tally shows, which is not always what
+     * the standard says: IDR is formally two-decimal and nobody has priced
+     * anything in sen for decades. Must match money.js exactly.
+     *
+     * It is no longer the scale anything is stored at — see [SCALE], which is
+     * the same for every currency. So this number is safe to change: it moves
+     * what is on screen and nothing else.
      */
     val CURRENCIES: Map<String, Currency> = linkedMapOf(
         "KRW" to Currency("₩", 0, "Korean won", "대한민국 원"),
@@ -78,11 +81,28 @@ object Money {
     fun isKnown(code: String?) = code != null && CURRENCIES.containsKey(code)
     fun of(code: String): Currency = CURRENCIES[code] ?: UNKNOWN
     fun decimals(code: String) = of(code).decimals
-    fun minorPerUnit(code: String): Long {
-        var n = 1L
-        repeat(decimals(code)) { n *= 10 }
-        return n
-    }
+
+    /**
+     * How finely every amount is stored: thousandths of a major unit, whatever
+     * the currency. Rp5,000.553 is 5000553; $12.40 is 12400.
+     *
+     * One scale for all of them, rather than each currency storing at whatever
+     * precision it happens to display. Two reasons. Someone who wants to write
+     * 0.883 rupiah can, which a scale of "whole rupiah" made impossible. And an
+     * amount in the wrong currency is no longer an amount off by a factor of a
+     * hundred — mixing up which currency a minor number belongs to used to
+     * silently rescale it, which is a whole family of bugs that cannot happen
+     * when the scale is the same everywhere.
+     */
+    const val SCALE = 3
+    private const val MINOR_PER_UNIT = 1000L
+
+    /**
+     * How many minor units make one major unit. The same for every currency —
+     * the argument is kept so call sites still read as a question about money.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    fun minorPerUnit(code: String): Long = MINOR_PER_UNIT
 
     fun name(code: String, lang: String) = if (lang == "ko") of(code).ko else of(code).en
 
@@ -94,11 +114,11 @@ object Money {
     // (locale, decimals) is enough, and all use is from the main thread.
     private val formats = HashMap<String, DecimalFormat>()
 
-    private fun formatter(locale: Locale, decimals: Int): DecimalFormat =
-        formats.getOrPut(locale.toLanguageTag() + "|" + decimals) {
+    private fun formatter(locale: Locale, min: Int, max: Int): DecimalFormat =
+        formats.getOrPut(locale.toLanguageTag() + "|" + min + "|" + max) {
             DecimalFormat("#,##0", DecimalFormatSymbols(locale)).apply {
-                minimumFractionDigits = decimals
-                maximumFractionDigits = decimals
+                minimumFractionDigits = min
+                maximumFractionDigits = max
                 isGroupingUsed = true
                 roundingMode = RoundingMode.HALF_UP
             }
@@ -106,7 +126,16 @@ object Money {
 
     enum class Sign { AUTO, ALWAYS, NEVER }
 
-    /** "₩12,400", "Rp118,200", "$12.40" — identical to formatMoney in money.js. */
+    /**
+     * "₩12,400", "Rp118,200", "$12.40" — identical to formatMoney in money.js.
+     *
+     * A currency's `decimals` is a floor, not a width. Won and rupiah show
+     * none, so a whole number of them stays "₩12,400" rather than
+     * "₩12,400.000" — three characters of noise on every row of the log. But
+     * the extra places are there when the amount needs them: "Rp5,000.553" is
+     * what was entered, and rounding it away on screen would be the app
+     * telling a small lie about a number it stored correctly.
+     */
     fun format(
         minor: Long,
         code: String,
@@ -116,8 +145,8 @@ object Money {
     ): String {
         val cur = of(code)
         val absMinor = abs(minor)
-        val digits = formatter(locale, cur.decimals)
-            .format(BigDecimal(absMinor).movePointLeft(cur.decimals))
+        val digits = formatter(locale, cur.decimals, SCALE)
+            .format(BigDecimal(absMinor).movePointLeft(SCALE))
 
         val prefix = when {
             minor < 0 && sign != Sign.NEVER -> MINUS
@@ -132,7 +161,7 @@ object Money {
     /** 1.2M, 843K — only above 10,000 units, where it actually saves reading. */
     fun formatCompact(minor: Long, code: String, locale: Locale = Locale.US): String {
         val cur = of(code)
-        val units = abs(minor).toDouble() / 10.0.pow(cur.decimals)
+        val units = abs(minor).toDouble() / MINOR_PER_UNIT
         if (units < 10_000) return format(minor, code, locale)
         val neg = if (minor < 0) MINUS else ""
         val tiers = listOf(1_000_000_000.0 to "B", 1_000_000.0 to "M", 1_000.0 to "K")
@@ -152,8 +181,13 @@ object Money {
     //  Reading an amount someone typed
     // ------------------------------------------------------------
 
-    /** The largest amount Tally will accept, in major units. */
-    const val MAX_AMOUNT = 1e13
+    /**
+     * The largest amount Tally will accept, in major units.
+     *
+     * A thousand times smaller than it looks it should be, because every
+     * amount is stored a thousand times larger.
+     */
+    const val MAX_AMOUNT = 1e12
 
     /**
      * @return minor units, or null when the field does not hold a usable
@@ -163,8 +197,18 @@ object Money {
         val value = Calc.eval(input) ?: return null
         val a = abs(value)
         if (a > MAX_AMOUNT) return null
-        val minor = BigDecimal(a)
-            .movePointRight(decimals(code))
+        // Rounding, not truncation: a fourth decimal typed into a field that
+        // keeps three is worth a tenth of a unit either way, and rounding is
+        // the answer that is never more than half of one out.
+        //
+        // valueOf, not the BigDecimal(Double) constructor. The constructor
+        // takes the exact binary value, and 1.0005 is really
+        // 1.000499999999999989 down there — so a half that JavaScript rounds
+        // up, Kotlin would round down, and the two apps would disagree about
+        // a number by a thousandth. valueOf goes through Double.toString and
+        // gets the 1.0005 the person actually typed.
+        val minor = BigDecimal.valueOf(a)
+            .movePointRight(SCALE)
             .setScale(0, RoundingMode.HALF_UP)
         return try {
             minor.longValueExact()
@@ -173,11 +217,24 @@ object Money {
         }
     }
 
-    /** Minor units back into something the amount field can show and re-parse. */
+    /**
+     * Minor units back into something the amount field can show and re-parse.
+     *
+     * The same floor-not-width rule as [format], minus the grouping: whole won
+     * come back as "12400" rather than "12400.000", and a rupiah amount that
+     * needed three places keeps all three.
+     */
     fun minorToInput(minor: Long, code: String): String {
-        val d = decimals(code)
-        val v = BigDecimal(minor).movePointLeft(d).setScale(d, RoundingMode.HALF_UP)
-        return v.toPlainString()
+        val floor = decimals(code)
+        var out = BigDecimal(minor).movePointLeft(SCALE).setScale(SCALE, RoundingMode.HALF_UP)
+            .toPlainString()
+        // Drop trailing zeros, but never past what this currency always shows.
+        if (SCALE > floor) {
+            val keep = out.length - (SCALE - floor)
+            while (out.length > keep && out.endsWith("0")) out = out.dropLast(1)
+            if (out.endsWith(".")) out = out.dropLast(1)
+        }
+        return out
     }
 
     // ------------------------------------------------------------
