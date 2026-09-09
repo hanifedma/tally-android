@@ -121,9 +121,14 @@ fun AccountEditorSheet(
     var name by remember { mutableStateOf(existing?.name ?: "") }
     var kind by remember { mutableStateOf(existing?.kind ?: "cash") }
     var currency by remember { mutableStateOf(existing?.currency ?: ledger.ctx.main) }
+    // Zero is what the field means when it is empty, so it shows nothing and
+    // lets the placeholder say "0". Writing the zero out puts a character in
+    // the way: everyone who wants a starting balance has to delete it before
+    // typing one.
     var opening by remember {
         mutableStateOf(
-            existing?.let { Money.minorToInput(it.openingMinor, it.currency) } ?: ""
+            existing?.takeIf { it.openingMinor != 0L }
+                ?.let { Money.minorToInput(it.openingMinor, it.currency) } ?: ""
         )
     }
     var colour by remember { mutableStateOf(existing?.color ?: "indigo") }
