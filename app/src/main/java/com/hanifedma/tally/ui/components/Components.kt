@@ -284,6 +284,13 @@ fun GhostButton(
     label: String,
     modifier: Modifier = Modifier,
     danger: Boolean = false,
+    /**
+     * Room for a word, or room for a glyph. A footer with three buttons in it
+     * has no width to spare, and 20dp down each side of a button whose label
+     * is a single character is what pushes the button beside it into an
+     * ellipsis.
+     */
+    compact: Boolean = false,
     onClick: () -> Unit,
 ) {
     val c = LocalTallyColors.current
@@ -293,7 +300,7 @@ fun GhostButton(
             .background(if (danger) c.dangerSoft else Color.Transparent)
             .border(1.dp, if (danger) Color.Transparent else c.borderStrong, RoundedCornerShape(11.dp))
             .clickable(onClick = onClick)
-            .padding(horizontal = 20.dp, vertical = 11.dp),
+            .padding(horizontal = if (compact) 14.dp else 20.dp, vertical = 11.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(

@@ -13,7 +13,7 @@ package com.hanifedma.tally.i18n
 //  can from here — that every key exists in both languages and that no
 //  placeholder was lost in translation.
 //
-//  278 keys, 2 languages.
+//  282 keys, 2 languages.
 // ============================================================
 
 object Strings {
@@ -279,6 +279,10 @@ object Strings {
         "delete" to "Delete",
         "close" to "Close",
         "done" to "Done",
+        "discard.title" to "Discard what you have written?",
+        "discard.body" to "This entry has not been saved yet.",
+        "discard.confirm" to "Discard",
+        "discard.keep" to "Keep editing",
         "back" to "Back",
         "loading" to "Loading…",
         "all" to "All",
@@ -561,6 +565,10 @@ object Strings {
         "delete" to "삭제",
         "close" to "닫기",
         "done" to "완료",
+        "discard.title" to "입력한 내용을 버릴까요?",
+        "discard.body" to "아직 저장되지 않았습니다.",
+        "discard.confirm" to "버리기",
+        "discard.keep" to "계속 입력",
         "back" to "뒤로",
         "loading" to "불러오는 중…",
         "all" to "전체",

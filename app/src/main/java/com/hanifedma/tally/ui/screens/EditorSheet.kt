@@ -22,6 +22,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -30,6 +31,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
@@ -111,6 +114,18 @@ data class Draft(
         )
     }
 
+    /**
+     * The parts of a draft a person put there, in the order they meet them.
+     *
+     * Everything else on a Draft is bookkeeping — the id, the currency and
+     * rate that follow whichever account is chosen, the timestamp — and none
+     * of it is work that would be missed if this were closed.
+     */
+    fun typedFields(): List<Any?> = listOf(
+        kind, amount, categoryId, accountId, toAccountId, toAmount, fee, note,
+        occurredOn, occurredMin,
+    )
+
     companion object {
         /**
          * @param toCurrency what the destination account holds. The row does
@@ -152,6 +167,7 @@ fun EditorSheet(
     onSetRate: (String, (Double) -> Unit) -> Unit,
     onSave: (TransactionRow, Boolean) -> Unit,
     onDelete: (TransactionRow) -> Unit,
+    onUnsaved: (Boolean) -> Unit,
     onClose: () -> Unit,
 ) {
     val c = LocalTallyColors.current
@@ -188,15 +204,33 @@ fun EditorSheet(
     val account = ledger.account(draft.accountId)
     val toAccount = ledger.account(draft.toAccountId)
     val currency = account?.currency ?: ctx.main
-    if (currency != draft.currency) draft = draft.copy(currency = currency)
     // Follows the destination account, so that changing it re-reads what
     // landed at the new account's scale rather than the old one's.
     val toCurrency = toAccount?.currency ?: currency
-    if (toCurrency != draft.toCurrency) draft = draft.copy(toCurrency = toCurrency)
+    // Written in an effect rather than straight into the draft, because a
+    // composable that writes state while it is composing has to be composed
+    // again to see it, and that doubles the work of every frame that touches
+    // this sheet.
+    LaunchedEffect(currency, toCurrency) {
+        if (currency != draft.currency || toCurrency != draft.toCurrency) {
+            draft = draft.copy(currency = currency, toCurrency = toCurrency)
+        }
+    }
 
     val isTransfer = draft.kind == "transfer"
     val category = ledger.category(draft.categoryId)
     val minor = Money.parseToMinor(draft.amount, currency)
+
+    // Is there anything here that closing would throw away?
+    //
+    // Compared field by field against the draft this opened with, so an
+    // entry typed and then rubbed out again counts as nothing, and an
+    // existing transaction reopened and left alone does too. The fields the
+    // editor keeps in step by itself — the currency and rate that follow the
+    // account — are not in the list: nobody typed those, and including them
+    // would make an untouched form claim to be unsaved work.
+    val unsaved = draft.typedFields() != initial.typedFields()
+    LaunchedEffect(unsaved) { onUnsaved(unsaved) }
 
     /**
      * The same transfer as the fee it cost last time.
@@ -228,7 +262,10 @@ fun EditorSheet(
             return
         }
         error = null
-        onSave(draft.toRow(), another)
+        // The two currencies are stated here rather than trusted to have
+        // arrived, so that a save in the same frame as a change of account
+        // cannot file the amount against the currency before it.
+        onSave(draft.copy(currency = currency, toCurrency = toCurrency).toRow(), another)
         if (another) {
             draft = draft.copy(
                 id = Ids.random(),
@@ -505,9 +542,14 @@ fun EditorSheet(
             }
 
             if (noteFocused && !noteDismissed) {
-                val suggestions = com.hanifedma.tally.core.Compute
-                    .noteSuggestions(ledger.transactions, draft.note, 5)
-                    .filter { !it.note.equals(draft.note.trim(), ignoreCase = true) }
+                // Kept between compositions. Working these out means sorting
+                // every transaction ever filed, and doing that again for each
+                // frame of, say, a sheet being dragged is how a cheap phone
+                // ends up stuttering over a list of five words.
+                val suggestions = remember(ledger.transactions, draft.note) {
+                    Compute.noteSuggestions(ledger.transactions, draft.note, 5)
+                        .filter { !it.note.equals(draft.note.trim(), ignoreCase = true) }
+                }
                 if (suggestions.isNotEmpty()) {
                     Spacer(Modifier.height(6.dp))
                     Column(
@@ -601,7 +643,18 @@ fun EditorSheet(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             if (existing != null) {
-                GhostButton(fmt.t("delete"), danger = true) { onDelete(existing) }
+                // A bin rather than the word "Delete", which is what the web
+                // does here and for the same reason: three labelled buttons
+                // do not fit across a phone, and the one that lost the
+                // argument was "Save & another", which arrived as "Save &".
+                // The label is still there for anyone listening to the screen
+                // rather than looking at it.
+                GhostButton(
+                    "🗑",
+                    danger = true,
+                    compact = true,
+                    modifier = Modifier.semantics { contentDescription = fmt.t("delete") },
+                ) { onDelete(existing) }
             }
             GhostButton(fmt.t("tx.saveAnother"), Modifier.weight(1f)) { save(true) }
             PrimaryButton(fmt.t("tx.save"), Modifier.weight(1f)) { save(false) }

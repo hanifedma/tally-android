@@ -39,6 +39,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -55,6 +56,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlin.math.abs
+import kotlin.math.max
 import kotlinx.coroutines.launch
 import coil.compose.AsyncImage
 import com.hanifedma.tally.R
@@ -108,6 +111,19 @@ sealed interface Sheet {
 }
 
 /**
+ * Is this a sheet someone types into?
+ *
+ * The ones that are keep their place until they are closed on purpose — see
+ * where this is used. The rest are things to read or to pick from, where a
+ * swipe down costs nothing and is the quickest way out.
+ */
+private fun Sheet.holdsTypedWork(): Boolean = when (this) {
+    is Sheet.Editor, is Sheet.EditAccount, is Sheet.EditCategory,
+    is Sheet.EditRate, Sheet.Budgets, Sheet.Rates -> true
+    else -> false
+}
+
+/**
  * A question asked before something irreversible.
  *
  * A dialog rather than another sheet: a sheet is a window of its own, and one
@@ -118,6 +134,13 @@ data class Confirm(
     val title: String,
     val body: String,
     val confirmLabel: String,
+    /**
+     * What the other button says. "Cancel" unless given, which is right for
+     * most of these and wrong for the one that asks whether to throw away a
+     * half-written entry: next to "Discard", a button marked "Cancel" is a
+     * question about the question.
+     */
+    val dismissLabel: String? = null,
     val onConfirm: () -> Unit,
 )
 
@@ -148,8 +171,18 @@ fun TallyApp(vm: TallyViewModel) {
         val stack = remember { mutableStateListOf<Sheet>() }
         var confirm by remember { mutableStateOf<Confirm?>(null) }
 
+        // Which open sheets are holding something that closing would throw
+        // away, by their place in the stack. Reported by the editors as what
+        // is in them changes; read here, where closing is decided.
+        val unsaved = remember { mutableStateMapOf<Int, Boolean>() }
+
         fun push(sheet: Sheet) = stack.add(sheet)
-        fun popTo(index: Int) { while (stack.size > index) stack.removeAt(stack.lastIndex) }
+        fun popTo(index: Int) {
+            while (stack.size > index) {
+                unsaved.remove(stack.lastIndex)
+                stack.removeAt(stack.lastIndex)
+            }
+        }
         fun popAll() = popTo(0)
 
         // Messages from the view model, shown once.
@@ -328,8 +361,14 @@ fun TallyApp(vm: TallyViewModel) {
             //
             // Vertical scrolling is untouched: the lists below get the
             // gesture first and only ever claim vertical drags, so a
-            // horizontal one falls through to here, and this never sees a
-            // gesture the list has already taken.
+            // horizontal one falls through to here.
+            //
+            // Which is also why the gesture has to prove it meant it. The
+            // list claiming the vertical part of a drag does not stop this
+            // seeing the sideways part of the same drag, so a long diagonal
+            // flick down a list could scroll it and turn the month over at
+            // the same time. A swipe counts only if it went further across
+            // than it went down.
             val swipesMonths = !ui.searching && ui.tab != TallyViewModel.Tab.ACCOUNTS
             Box(
                 Modifier
@@ -341,16 +380,25 @@ fun TallyApp(vm: TallyViewModel) {
                             // during a tap or a vertical scroll.
                             val enough = 72.dp.toPx()
                             var travelled = 0f
+                            var strayed = 0f
+                            var from = 0f
                             detectHorizontalDragGestures(
-                                onDragStart = { travelled = 0f },
+                                onDragStart = { start ->
+                                    travelled = 0f
+                                    strayed = 0f
+                                    from = start.y
+                                },
                                 onDragCancel = { travelled = 0f },
                                 onDragEnd = {
-                                    when {
-                                        travelled <= -enough -> vm.shiftPeriod(1)
-                                        travelled >= enough -> vm.shiftPeriod(-1)
+                                    val across = abs(travelled)
+                                    if (across >= enough && across > strayed) {
+                                        vm.shiftPeriod(if (travelled < 0) 1 else -1)
                                     }
                                 },
-                            ) { _, delta -> travelled += delta }
+                            ) { change, delta ->
+                                travelled += delta
+                                strayed = max(strayed, abs(change.position.y - from))
+                            }
                         }
                     )
             ) {
@@ -386,16 +434,49 @@ fun TallyApp(vm: TallyViewModel) {
             }
         }
 
+        // Close a sheet, asking first if there is unsaved work in it. Every
+        // way out of a sheet goes through here — the ✕, the back gesture, a
+        // tap on the dimmed page behind — so there is one answer to "what
+        // happens to what I had written", not three.
+        fun requestClose(index: Int) {
+            if (unsaved[index] != true) {
+                popTo(index)
+                return
+            }
+            confirm = Confirm(
+                title = fmt.t("discard.title"),
+                body = fmt.t("discard.body"),
+                confirmLabel = fmt.t("discard.confirm"),
+                dismissLabel = fmt.t("discard.keep"),
+            ) { popTo(index) }
+        }
+
         // ---- sheets, stacked in the order they were opened ----
         stack.forEachIndexed { index, sheet ->
             key(index) {
                 val state = rememberModalBottomSheetState(skipPartiallyExpanded = true)
                 ModalBottomSheet(
-                    onDismissRequest = { popTo(index) },
+                    onDismissRequest = { requestClose(index) },
                     sheetState = state,
                     containerColor = c.elevated,
                     contentColor = c.text,
                     dragHandle = null,
+                    // A form cannot be swiped away.
+                    //
+                    // Swiping a sheet down is a fine way to dismiss something
+                    // you are only looking at, and a bad one for something you
+                    // are half way through writing: the gesture is easy to
+                    // make by accident while reaching for a field, and what it
+                    // costs is everything typed so far. Dragging a tall form
+                    // around is also the most expensive thing this screen can
+                    // be asked to do, and on a slow phone it judders while it
+                    // does it.
+                    //
+                    // So the sheets that hold typed work do not move, and the
+                    // ✕ in their corner is how they close. The ones that hold
+                    // nothing — a category to pick, a list to read — keep the
+                    // gesture, because dismissing those costs nothing.
+                    sheetGesturesEnabled = !sheet.holdsTypedWork(),
                 ) {
                     SheetContent(
                         sheet = sheet,
@@ -403,7 +484,14 @@ fun TallyApp(vm: TallyViewModel) {
                         fmt = fmt,
                         ledger = ledger,
                         email = ui.account?.email,
+                        // Two ways to close, and the difference matters. The
+                        // first is the app's own — after a save, after a pick
+                        // — and has nothing to ask about. The second is the
+                        // person asking to leave, which is where the question
+                        // about unsaved work belongs.
                         onClose = { popTo(index) },
+                        onDismiss = { requestClose(index) },
+                        onUnsaved = { unsaved[index] = it },
                         onCloseAll = { popAll() },
                         onPush = { push(it) },
                         onDeleteTransaction = { deleteTransaction(it) },
@@ -438,7 +526,7 @@ fun TallyApp(vm: TallyViewModel) {
                 },
                 dismissButton = {
                     TextButton(onClick = { confirm = null }) {
-                        Text(fmt.t("cancel"), color = c.muted)
+                        Text(ask.dismissLabel ?: fmt.t("cancel"), color = c.muted)
                     }
                 },
             )
@@ -472,6 +560,8 @@ private fun SheetContent(
     ledger: com.hanifedma.tally.core.Ledger,
     email: String?,
     onClose: () -> Unit,
+    onDismiss: () -> Unit,
+    onUnsaved: (Boolean) -> Unit,
     onCloseAll: () -> Unit,
     onPush: (Sheet) -> Unit,
     onDeleteTransaction: (TransactionRow) -> Unit,
@@ -497,10 +587,13 @@ private fun SheetContent(
                 // Follow the entry: saving something dated last month and
                 // staying on this one looks as though nothing happened.
                 if (row.occurredOn !in vm.period()) vm.goToPeriod(row.occurredOn)
+                // Saved is not unsaved, and closing now has nothing to ask.
+                onUnsaved(false)
                 if (!another) onClose()
             },
             onDelete = onDeleteTransaction,
-            onClose = onClose,
+            onUnsaved = onUnsaved,
+            onClose = onDismiss,
         )
 
         is Sheet.PickCategory -> CategoryPickerSheet(
@@ -569,6 +662,7 @@ private fun SheetContent(
                     )
                 } else {
                     repo?.put(account)
+                    onUnsaved(false)
                     onClose()
                 }
             },
@@ -584,12 +678,13 @@ private fun SheetContent(
                     ) { repo?.delete(account); onClose() }
                 )
             },
-            onClose = onClose,
+            onUnsaved = onUnsaved,
+            onClose = onDismiss,
         )
 
         is Sheet.EditCategory -> CategoryEditorSheet(
             ledger, fmt, sheet.category, sheet.kind,
-            onSave = { repo?.put(it); onClose() },
+            onSave = { repo?.put(it); onUnsaved(false); onClose() },
             onDelete = { category ->
                 val n = ledger.transactions.count { it.categoryId == category.id }
                 onConfirm(
@@ -600,7 +695,8 @@ private fun SheetContent(
                     ) { repo?.delete(category); onClose() }
                 )
             },
-            onClose = onClose,
+            onUnsaved = onUnsaved,
+            onClose = onDismiss,
         )
 
         is Sheet.ManageCategories -> ManageCategoriesSheet(

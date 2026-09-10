@@ -23,6 +23,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -115,6 +116,7 @@ fun AccountEditorSheet(
     existing: AccountRow?,
     onSave: (AccountRow) -> Unit,
     onDelete: (AccountRow) -> Unit,
+    onUnsaved: (Boolean) -> Unit,
     onClose: () -> Unit,
 ) {
     val c = LocalTallyColors.current
@@ -134,6 +136,19 @@ fun AccountEditorSheet(
     var colour by remember { mutableStateOf(existing?.color ?: "indigo") }
     var archived by remember { mutableStateOf(existing?.archived ?: false) }
     var error by remember { mutableStateOf<String?>(null) }
+
+    // Anything here that closing would throw away — see the same idea in
+    // EditorSheet. A name typed and rubbed out again counts as nothing.
+    val unsaved = listOf(name, kind, currency, opening, colour, archived) != listOf(
+        existing?.name ?: "",
+        existing?.kind ?: "cash",
+        existing?.currency ?: ledger.ctx.main,
+        existing?.takeIf { it.openingMinor != 0L }
+            ?.let { Money.minorToInput(it.openingMinor, it.currency) } ?: "",
+        existing?.color ?: "indigo",
+        existing?.archived ?: false,
+    )
+    LaunchedEffect(unsaved) { onUnsaved(unsaved) }
 
     Column(Modifier.fillMaxWidth()) {
         SheetHeader(if (existing == null) fmt.t("acc.new") else fmt.t("acc.edit"), onClose)
@@ -248,6 +263,7 @@ fun CategoryEditorSheet(
     startKind: String,
     onSave: (CategoryRow) -> Unit,
     onDelete: (CategoryRow) -> Unit,
+    onUnsaved: (Boolean) -> Unit,
     onClose: () -> Unit,
 ) {
     val c = LocalTallyColors.current
@@ -257,6 +273,15 @@ fun CategoryEditorSheet(
     var colour by remember { mutableStateOf(existing?.color ?: "gray") }
     var archived by remember { mutableStateOf(existing?.archived ?: false) }
     var error by remember { mutableStateOf<String?>(null) }
+
+    val unsaved = listOf(name, icon, kind, colour, archived) != listOf(
+        existing?.name ?: "",
+        existing?.icon ?: "•",
+        existing?.kind ?: startKind,
+        existing?.color ?: "gray",
+        existing?.archived ?: false,
+    )
+    LaunchedEffect(unsaved) { onUnsaved(unsaved) }
 
     Column(Modifier.fillMaxWidth()) {
         SheetHeader(if (existing == null) fmt.t("cat.new") else fmt.t("cat.edit"), onClose)
