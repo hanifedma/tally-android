@@ -13,7 +13,7 @@ package com.hanifedma.tally.i18n
 //  can from here — that every key exists in both languages and that no
 //  placeholder was lost in translation.
 //
-//  282 keys, 2 languages.
+//  286 keys, 2 languages.
 // ============================================================
 
 object Strings {
@@ -39,6 +39,7 @@ object Strings {
         "search.results" to "{n} found",
         "search.none" to "Nothing matches “{q}”.",
         "add.new" to "Add a transaction",
+        "filter.clear" to "Show every account again",
         "login.h1" to "Money, counted simply.",
         "login.sub" to "One ledger for every account and every currency — on your phone and your laptop at the same time.",
         "login.google" to "Continue with Google",
@@ -93,6 +94,8 @@ object Strings {
         "log.empty.cta" to "Add a transaction",
         "log.emptyMonth.h" to "No transactions this month",
         "log.emptyMonth.p" to "Nothing was recorded between {start} and {end}.",
+        "log.emptyAccount.h" to "Nothing in {name} this month",
+        "log.emptyAccount.p" to "No money has gone into or out of {name} yet.",
         "log.dayTotal" to "Day total",
         "log.uncategorised" to "Uncategorised",
         "log.noAccount" to "No account",
@@ -104,6 +107,7 @@ object Strings {
         "ins.budgetEdit" to "Edit budgets",
         "ins.budgetNone.h" to "No budget set",
         "ins.budgetNone.p" to "A ceiling for the month makes overspending visible before the month ends.",
+        "ins.budgetAllAccounts" to "Budgets count every account, not only {name}.",
         "ins.budgetLeft" to "{amount} left",
         "ins.budgetOver" to "{amount} over",
         "ins.budgetTotal" to "Total budget",
@@ -118,7 +122,6 @@ object Strings {
         "ins.top" to "Most frequent",
         "ins.topCount" to "{n}×",
         "ins.avgDay" to "Average a day",
-        "ins.avgProjected" to "Projected month",
         "ins.biggest" to "Largest single expense",
         "ins.empty" to "Nothing to chart yet.",
         "ins.showExpense" to "Expenses",
@@ -128,6 +131,7 @@ object Strings {
         "acc.liabilities" to "Card balance",
         "acc.add" to "Add an account",
         "acc.edit" to "Edit account",
+        "acc.seeTransactions" to "See everything in {name}",
         "acc.new" to "New account",
         "acc.name" to "Name",
         "acc.namePlaceholder" to "Bank, wallet, card…",
@@ -325,6 +329,7 @@ object Strings {
         "search.results" to "{n}건",
         "search.none" to "“{q}”와 일치하는 내역이 없습니다.",
         "add.new" to "내역 추가",
+        "filter.clear" to "모든 자산 다시 보기",
         "login.h1" to "가계부, 단순하게.",
         "login.sub" to "모든 계좌와 모든 통화를 한 장부에. 휴대폰과 노트북에서 동시에.",
         "login.google" to "Google로 계속하기",
@@ -379,6 +384,8 @@ object Strings {
         "log.empty.cta" to "내역 추가",
         "log.emptyMonth.h" to "이번 달 내역이 없습니다",
         "log.emptyMonth.p" to "{start}부터 {end}까지 기록된 내역이 없습니다.",
+        "log.emptyAccount.h" to "이번 달 {name} 내역이 없습니다",
+        "log.emptyAccount.p" to "{name}에 들어오거나 나간 돈이 아직 없습니다.",
         "log.dayTotal" to "하루 합계",
         "log.uncategorised" to "미분류",
         "log.noAccount" to "자산 없음",
@@ -390,6 +397,7 @@ object Strings {
         "ins.budgetEdit" to "예산 편집",
         "ins.budgetNone.h" to "예산이 없습니다",
         "ins.budgetNone.p" to "한 달 한도를 정해 두면 달이 끝나기 전에 과소비가 보입니다.",
+        "ins.budgetAllAccounts" to "예산은 {name}뿐 아니라 모든 자산을 합산합니다.",
         "ins.budgetLeft" to "{amount} 남음",
         "ins.budgetOver" to "{amount} 초과",
         "ins.budgetTotal" to "전체 예산",
@@ -404,7 +412,6 @@ object Strings {
         "ins.top" to "자주 쓴 항목",
         "ins.topCount" to "{n}회",
         "ins.avgDay" to "하루 평균",
-        "ins.avgProjected" to "이번 달 예상",
         "ins.biggest" to "가장 큰 지출",
         "ins.empty" to "아직 그릴 내역이 없습니다.",
         "ins.showExpense" to "지출",
@@ -414,6 +421,7 @@ object Strings {
         "acc.liabilities" to "카드 잔액",
         "acc.add" to "자산 추가",
         "acc.edit" to "자산 편집",
+        "acc.seeTransactions" to "{name} 내역 보기",
         "acc.new" to "새 자산",
         "acc.name" to "이름",
         "acc.namePlaceholder" to "은행, 지갑, 카드…",

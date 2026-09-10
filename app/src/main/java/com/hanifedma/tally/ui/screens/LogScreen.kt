@@ -49,6 +49,15 @@ fun LogScreen(
     period: Dates.Period,
     searching: Boolean,
     search: String,
+    /**
+     * The ledger as it is being looked at — every account, or the one being
+     * shown. Handed in rather than read off `ledger`, so that the totals in
+     * the header above and the list below can never disagree about which
+     * money is being counted.
+     */
+    transactions: List<TransactionRow>,
+    /** The account being shown, when there is one, for the empty state. */
+    filtered: com.hanifedma.tally.core.AccountRow?,
     contentPadding: androidx.compose.foundation.layout.PaddingValues,
     onOpen: (TransactionRow) -> Unit,
     onAddFirst: () -> Unit,
@@ -57,22 +66,41 @@ fun LogScreen(
     val ctx = ledger.ctx
 
     val rows = if (searching && search.isNotBlank()) {
-        Compute.search(ledger.transactions, search, ledger.categories, ledger.accounts)
+        Compute.search(transactions, search, ledger.categories, ledger.accounts)
     } else {
-        Compute.inPeriod(ledger.transactions, period)
+        Compute.inPeriod(transactions, period)
     }
 
     if (rows.isEmpty()) {
         Column(Modifier.fillMaxWidth().padding(contentPadding)) {
             if (searching && search.isNotBlank()) {
                 EmptyState("🔍", fmt.t("search.open"), fmt.t("search.none", mapOf("q" to search.trim())))
-            } else if (ledger.transactions.isEmpty()) {
+            } else if (transactions.isEmpty() && filtered != null) {
+                // Not "nothing here yet" — there is a ledger, this account
+                // simply has no part in it.
+                EmptyState(
+                    "🧾",
+                    fmt.t("log.emptyAccount.h", mapOf("name" to filtered.name)),
+                    fmt.t("log.emptyAccount.p", mapOf("name" to filtered.name)),
+                    fmt.t("log.empty.cta"),
+                    onAddFirst,
+                )
+            } else if (transactions.isEmpty()) {
                 EmptyState(
                     "🧾",
                     fmt.t("log.empty.h"),
                     fmt.t("log.empty.p"),
                     fmt.t("log.empty.cta"),
                     onAddFirst,
+                )
+            } else if (filtered != null) {
+                EmptyState(
+                    "🗓",
+                    fmt.t("log.emptyAccount.h", mapOf("name" to filtered.name)),
+                    fmt.t(
+                        "log.emptyMonth.p",
+                        mapOf("start" to fmt.dayShort(period.start), "end" to fmt.dayShort(period.end)),
+                    ),
                 )
             } else {
                 EmptyState(

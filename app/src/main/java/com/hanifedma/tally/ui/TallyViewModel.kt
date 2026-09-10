@@ -48,6 +48,8 @@ class TallyViewModel(app: Application) : AndroidViewModel(app) {
         val searching: Boolean = false,
         val insightsIncome: Boolean = false,
         val showArchivedAccounts: Boolean = false,
+        /** Showing one account only, by id. Null is every account. */
+        val accountFilter: String? = null,
         val signingIn: Boolean = false,
         /** A Strings key, shown once and cleared. */
         val message: String? = null,
@@ -373,6 +375,20 @@ class TallyViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setShowArchivedAccounts(show: Boolean) {
         _ui.value = _ui.value.copy(showArchivedAccounts = show)
+    }
+
+    /**
+     * Show one account's money and nothing else, or all of it again.
+     *
+     * Picking one moves to the log, because that is what was asked for; a
+     * search in progress is left alone, and simply searches inside the
+     * account now.
+     */
+    fun filterByAccount(id: String?) {
+        _ui.value = _ui.value.copy(
+            accountFilter = id,
+            tab = if (id != null) Tab.LOG else _ui.value.tab,
+        )
     }
 
     fun showMessage(key: String, isError: Boolean = false, literal: String? = null) {

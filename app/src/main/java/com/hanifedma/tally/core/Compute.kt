@@ -59,6 +59,22 @@ object Compute {
         rows.filter { it.occurredOn in period }
 
     /**
+     * Everything that touched one account — forAccount in money.js.
+     *
+     * Both ends of a transfer count. Money that left this account and money
+     * that arrived in it are equally part of its story, and a list that
+     * showed only one direction would not add up to the balance the account
+     * reports.
+     *
+     * No account named means no filtering: the caller gets the whole ledger
+     * straight back rather than having to ask whether a filter is on.
+     */
+    fun forAccount(rows: List<TransactionRow>, accountId: String?): List<TransactionRow> {
+        if (accountId.isNullOrEmpty()) return rows
+        return rows.filter { it.accountId == accountId || it.toAccountId == accountId }
+    }
+
+    /**
      * Every account's balance, in its own currency.
      *
      * No conversion happens here: a transaction is denominated in its

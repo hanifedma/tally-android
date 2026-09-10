@@ -190,6 +190,95 @@ class ParityTest {
         }
     }
 
+    @Test
+    fun `one account's transactions are everything that touched it`() {
+        val rows = listOf(
+            tx(1000, kind = "expense", accountId = "cash", id = "a"),
+            tx(1000, kind = "expense", accountId = "bank", id = "b"),
+            tx(1000, kind = "transfer", accountId = "bank", toAccountId = "cash", id = "c"),
+            tx(1000, kind = "transfer", accountId = "cash", toAccountId = "bank", id = "d"),
+            tx(1000, kind = "income", accountId = "bank", id = "e"),
+        )
+        // Both ends of a transfer count: money that left and money that arrived.
+        assertEquals(listOf("a", "c", "d"), Compute.forAccount(rows, "cash").map { it.id })
+        assertEquals(listOf("b", "c", "d", "e"), Compute.forAccount(rows, "bank").map { it.id })
+        // An account with no history is empty, not everything.
+        assertEquals(emptyList<String>(), Compute.forAccount(rows, "nowhere").map { it.id })
+        // No account named is no filter at all — the same list, untouched.
+        assertEquals(rows, Compute.forAccount(rows, null))
+        assertEquals(rows, Compute.forAccount(rows, ""))
+    }
+
+    // ------------------------------------------------------------
+    //  Thousands separators while typing
+    // ------------------------------------------------------------
+
+    @Test
+    fun `an amount gets its separators as it is typed`() {
+        assertEquals("310,575", Money.groupAmount("310575"))
+        assertEquals("1,000,000.54", Money.groupAmount("1000000.54"))
+        assertEquals("999", Money.groupAmount("999"))
+        assertEquals("1,000", Money.groupAmount("1000"))
+        assertEquals("", Money.groupAmount(""))
+        assertEquals("0", Money.groupAmount("0"))
+        // The places after the point are a fraction, not thousands.
+        assertEquals("1,000.5555", Money.groupAmount("1000.5555"))
+        assertEquals(".5555", Money.groupAmount(".5555"))
+        assertEquals("1,000.", Money.groupAmount("1000."))
+        assertEquals("-20,000", Money.groupAmount("-20000"))
+    }
+
+    @Test
+    fun `separators do not disturb the arithmetic the field allows`() {
+        assertEquals("1,000+2,000", Money.groupAmount("1000+2000"))
+        assertEquals("12,000×3", Money.groupAmount("12000×3"))
+        assertEquals("(10,000+2)÷4", Money.groupAmount("(10000+2)÷4"))
+        assertEquals("1,000+", Money.groupAmount("1000+"))
+        // Whatever it does to the text, it may not change what the text means.
+        for (src in listOf("310575", "1000000.54", "1000+2000", "12000×3", "(10000+2)÷4", "0.883")) {
+            assertEquals(
+                src,
+                Money.parseToMinor(src, "IDR"),
+                Money.parseToMinor(Money.groupAmount(src), "IDR"),
+            )
+        }
+    }
+
+    @Test
+    fun `grouping an amount twice changes nothing the second time`() {
+        for (src in listOf("1000000.54", "1,000,000.54", "1000+2000", "-20000", "1000.")) {
+            assertEquals(src, Money.groupAmount(src), Money.groupAmount(Money.groupAmount(src)))
+        }
+        // Separators put in by hand are re-placed, never trusted.
+        assertEquals("1,000", Money.groupAmount("1,0,0,0"))
+        assertEquals("310,575,000", Money.groupAmount("310,575000"))
+    }
+
+    @Test
+    fun `the caret stays with what was written, not with the separators`() {
+        assertEquals(Money.Typed("9,999", 5), Money.groupAmountEdit("999", "9999", 4))
+        assertEquals(Money.Typed("10,500", 4), Money.groupAmountEdit("1,000", "1,0500", 4))
+        assertEquals(Money.Typed("999", 3), Money.groupAmountEdit("99", "999", 3))
+        assertEquals(Money.Typed("21,000", 1), Money.groupAmountEdit("1000", "21000", 1))
+        assertEquals(Money.Typed("1,000", 5), Money.groupAmountEdit("1000", "1000,", 5))
+    }
+
+    @Test
+    fun `backspacing a separator takes the digit it was hiding behind`() {
+        // "1,234,|567" — the key landed on the separator, so it takes the 4.
+        assertEquals(Money.Typed("123,567", 3), Money.groupAmountEdit("1,234,567", "1,234567", 5))
+        assertEquals(Money.Typed("000", 0), Money.groupAmountEdit("1,000", "1000", 1))
+        // Forward delete takes the digit on its other side.
+        assertEquals(
+            Money.Typed("123,467", 5),
+            Money.groupAmountEdit("1,234,567", "1,234567", 5, forward = true),
+        )
+        // An ordinary backspace is not mistaken for one, nor is deleting an
+        // operator, which leaves the same digits behind.
+        assertEquals(Money.Typed("1,000", 5), Money.groupAmountEdit("10,000", "10,00", 5))
+        assertEquals(Money.Typed("1,000,200", 5), Money.groupAmountEdit("1000+200", "1000200", 4))
+    }
+
     // ------------------------------------------------------------
     //  Dates
     // ------------------------------------------------------------

@@ -136,7 +136,10 @@ data class Draft(
         fun from(tx: TransactionRow, toCurrency: String? = null) = Draft(
             id = tx.id,
             kind = tx.kind,
-            amount = Money.minorToInput(tx.amountMinor, tx.currency),
+            // Grouped, as the fields will show it: a draft that did not match
+            // what is on screen would read as unsaved work the moment it
+            // opened.
+            amount = Money.groupAmount(Money.minorToInput(tx.amountMinor, tx.currency)),
             currency = tx.currency,
             rate = tx.rate,
             rateBase = tx.rateBase,
@@ -144,8 +147,11 @@ data class Draft(
             toAccountId = tx.toAccountId,
             toCurrency = toCurrency ?: tx.currency,
             toAmount = tx.toAmountMinor
-                ?.let { Money.minorToInput(it, toCurrency ?: tx.currency) } ?: "",
-            fee = if (tx.feeMinor != 0L) Money.minorToInput(tx.feeMinor, tx.currency) else "",
+                ?.let { Money.groupAmount(Money.minorToInput(it, toCurrency ?: tx.currency)) }
+                ?: "",
+            fee = if (tx.feeMinor != 0L) {
+                Money.groupAmount(Money.minorToInput(tx.feeMinor, tx.currency))
+            } else "",
             categoryId = tx.categoryId,
             note = tx.note,
             occurredOn = tx.occurredOn,
@@ -247,7 +253,9 @@ fun EditorSheet(
             ledger.transactions, d.accountId, d.toAccountId, d.currency,
         )
         return d.copy(
-            fee = if (was != null && was != 0L) Money.minorToInput(was, d.currency) else "",
+            fee = if (was != null && was != 0L) {
+                Money.groupAmount(Money.minorToInput(was, d.currency))
+            } else "",
         )
     }
 
@@ -345,9 +353,10 @@ fun EditorSheet(
                     "transfer" -> c.transfer
                     else -> c.expense
                 },
-                onChange = {
-                    amountField = it
-                    draft = draft.copy(amount = it.text)
+                onChange = { next ->
+                    val grouped = regrouped(amountField, next)
+                    amountField = grouped
+                    if (grouped.text != draft.amount) draft = draft.copy(amount = grouped.text)
                     error = null
                 },
             )
@@ -357,7 +366,10 @@ fun EditorSheet(
                 // field leaves it at the offset it already had, which puts it
                 // to the *left* of the operator you pressed — so the next
                 // digit lands on the wrong side of it.
-                val next = amountField.text + op
+                //
+                // Grouped on the way in, so that what the 000 key adds reads
+                // the same as three noughts that were typed.
+                val next = Money.groupAmount(amountField.text + op)
                 amountField = TextFieldValue(next, TextRange(next.length))
                 draft = draft.copy(amount = next)
                 error = null
@@ -482,11 +494,9 @@ fun EditorSheet(
                 // should not have to say so.
                 val feeBad = draft.fee.isNotBlank() && Money.parseToMinor(draft.fee, currency) == null
                 FieldLabel(fmt.t("tx.fee") + " · " + currency)
-                PlainField(
+                MoneyField(
                     value = draft.fee,
                     placeholder = Money.minorToInput(0L, currency),
-                    numeric = true,
-                    alignEnd = true,
                 ) {
                     draft = draft.copy(fee = it)
                     // From here on this transfer's fee is the person's, not
@@ -503,14 +513,14 @@ fun EditorSheet(
                 // Only a cross-currency transfer needs to say what landed.
                 if (account != null && toAccount != null && account.currency != toAccount.currency) {
                     FieldLabel(fmt.t("tx.receives") + " · " + toAccount.currency)
-                    PlainField(
+                    MoneyField(
                         value = draft.toAmount,
-                        placeholder = Money.minorToInput(
-                            Money.convertMinor(minor ?: 0L, currency, toAccount.currency, ctx),
-                            toAccount.currency,
+                        placeholder = Money.groupAmount(
+                            Money.minorToInput(
+                                Money.convertMinor(minor ?: 0L, currency, toAccount.currency, ctx),
+                                toAccount.currency,
+                            )
                         ),
-                        numeric = true,
-                        alignEnd = true,
                     ) { draft = draft.copy(toAmount = it) }
                     Help(fmt.t("tx.receivesHelp"), Modifier.padding(top = 6.dp, bottom = 14.dp))
                 } else if (draft.toAmount.isNotBlank()) {
@@ -843,6 +853,54 @@ fun PlainField(
         modifier = plainFieldModifier(onFocus),
         decorationBox = plainDecoration(value.text.isEmpty(), placeholder, alignEnd),
     )
+}
+
+/**
+ * What a keystroke leaves in a field that groups its digits.
+ *
+ * A caret moved or a selection dragged is not an edit, and comes back
+ * untouched: collapsing a selection to a caret would make it impossible to
+ * select anything at all.
+ */
+fun regrouped(before: TextFieldValue, next: TextFieldValue): TextFieldValue {
+    if (next.text == before.text) return next
+    val typed = Money.groupAmountEdit(before.text, next.text, next.selection.start)
+    if (typed.text == next.text) return next
+    return TextFieldValue(typed.text, TextRange(typed.caret))
+}
+
+/**
+ * A money field that puts the thousands separators in as they are typed:
+ * 310575 becomes 310,575 under the person's hands.
+ *
+ * It holds its own caret, because the text handed back is not the text that
+ * was typed — a separator appearing to the left of the cursor would
+ * otherwise drag the cursor along with it. What [onChange] receives is the
+ * grouped text, which every reader of an amount strips before parsing.
+ */
+@Composable
+fun MoneyField(
+    value: String,
+    placeholder: String = "",
+    onChange: (String) -> Unit,
+) {
+    var field by remember { mutableStateOf(TextFieldValue(value, TextRange(value.length))) }
+    // Something other than typing changed it: a remembered fee arriving, or
+    // a form clearing itself after a save. In an effect rather than in
+    // composition, so that reading it never means composing twice.
+    LaunchedEffect(value) {
+        if (value != field.text) field = TextFieldValue(value, TextRange(value.length))
+    }
+    PlainField(
+        value = field,
+        placeholder = placeholder,
+        numeric = true,
+        alignEnd = true,
+    ) { next ->
+        val grouped = regrouped(field, next)
+        field = grouped
+        if (grouped.text != value) onChange(grouped.text)
+    }
 }
 
 @Composable

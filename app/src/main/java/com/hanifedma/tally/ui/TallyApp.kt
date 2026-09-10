@@ -2,6 +2,7 @@ package com.hanifedma.tally.ui
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -51,6 +52,8 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -72,6 +75,7 @@ import com.hanifedma.tally.core.TransactionRow
 import com.hanifedma.tally.data.LedgerRepository
 import com.hanifedma.tally.data.Supabase
 import com.hanifedma.tally.ui.components.Help
+import com.hanifedma.tally.ui.components.IconChip
 import com.hanifedma.tally.ui.components.Segmented
 import com.hanifedma.tally.ui.screens.AccountEditorSheet
 import com.hanifedma.tally.ui.screens.AccountPickerSheet
@@ -262,6 +266,19 @@ fun TallyApp(vm: TallyViewModel) {
         val period = vm.period()
         val repo = vm.repository()
 
+        // The ledger as it is being looked at: one account, or all of them.
+        //
+        // An account deleted on another device while its filter was on would
+        // otherwise leave the log looking empty for no visible reason, so a
+        // filter that no longer names anything is dropped.
+        val filtered = ui.accountFilter?.let { ledger.account(it) }
+        LaunchedEffect(ui.accountFilter, filtered) {
+            if (ui.accountFilter != null && filtered == null) vm.filterByAccount(null)
+        }
+        val visible = remember(ledger.transactions, filtered?.id) {
+            Compute.forAccount(ledger.transactions, filtered?.id)
+        }
+
         /** Delete with an undo, because a mis-tap should cost one tap back. */
         fun deleteTransaction(tx: TransactionRow) {
             repo?.delete(tx)
@@ -297,7 +314,17 @@ fun TallyApp(vm: TallyViewModel) {
                         }
                     } else {
                         PeriodBar(vm, fmt, period, ledger.settings.monthStart)
-                        SummaryBar(fmt, Compute.totals(Compute.inPeriod(ledger.transactions, period), ledger.ctx))
+                        SummaryBar(fmt, Compute.totals(Compute.inPeriod(visible, period), ledger.ctx))
+                    }
+                    // Under the totals it governs, and on every tab, so that
+                    // what is being counted is never a question. Tapping it
+                    // gives every account back.
+                    if (filtered != null) {
+                        FilterChip(
+                            account = filtered,
+                            balance = Compute.balances(listOf(filtered), ledger.transactions)[filtered.id] ?: 0L,
+                            fmt = fmt,
+                        ) { vm.filterByAccount(null) }
                     }
                     Box(Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
                         Segmented(
@@ -332,7 +359,7 @@ fun TallyApp(vm: TallyViewModel) {
                                 push(Sheet.EditAccount(null))
                                 return@clickable
                             }
-                            push(Sheet.Editor(newDraft(ledger), null))
+                            push(Sheet.Editor(newDraft(ledger, filtered), null))
                         },
                     contentAlignment = Alignment.Center,
                 ) {
@@ -405,6 +432,7 @@ fun TallyApp(vm: TallyViewModel) {
                 when (ui.tab) {
                     TallyViewModel.Tab.LOG -> LogScreen(
                         ledger, fmt, period, ui.searching, ui.search,
+                        visible, filtered,
                         listPadding,
                         onOpen = {
                             push(
@@ -414,10 +442,11 @@ fun TallyApp(vm: TallyViewModel) {
                                 )
                             )
                         },
-                        onAddFirst = { push(Sheet.Editor(newDraft(ledger), null)) },
+                        onAddFirst = { push(Sheet.Editor(newDraft(ledger, filtered), null)) },
                     )
                     TallyViewModel.Tab.INSIGHTS -> InsightsScreen(
                         ledger, fmt, period, ui.insightsIncome,
+                        visible, filtered,
                         listPadding,
                         onShowIncome = { vm.setInsightsIncome(it) },
                         onEditBudgets = { push(Sheet.Budgets) },
@@ -426,7 +455,8 @@ fun TallyApp(vm: TallyViewModel) {
                     TallyViewModel.Tab.ACCOUNTS -> AccountsScreen(
                         ledger, fmt, ui.showArchivedAccounts,
                         listPadding,
-                        onOpen = { push(Sheet.EditAccount(it)) },
+                        onOpen = { vm.filterByAccount(it.id) },
+                        onEdit = { push(Sheet.EditAccount(it)) },
                         onAdd = { push(Sheet.EditAccount(null)) },
                         onToggleArchived = { vm.setShowArchivedAccounts(!ui.showArchivedAccounts) },
                     )
@@ -535,12 +565,15 @@ fun TallyApp(vm: TallyViewModel) {
 }
 
 /** A blank entry, opened on the account and category last used. */
-private fun newDraft(ledger: com.hanifedma.tally.core.Ledger): Draft {
+private fun newDraft(ledger: com.hanifedma.tally.core.Ledger, filtered: AccountRow? = null): Draft {
     val accounts = ledger.liveAccounts()
     val last = ledger.transactions
         .filter { it.kind == "expense" && it.categoryId != null }
         .minWithOrNull(Compute.newestFirst)
-    val account = last?.accountId?.let { id -> accounts.firstOrNull { it.id == id } }
+    // Whichever account is being looked at is overwhelmingly the one being
+    // written down; failing that, the one used last.
+    val account = filtered?.takeIf { !it.archived }
+        ?: last?.accountId?.let { id -> accounts.firstOrNull { it.id == id } }
         ?: accounts.firstOrNull()
     return Draft(
         id = Ids.random(),
@@ -999,6 +1032,59 @@ private fun SummaryBar(fmt: Fmt, totals: Compute.Totals) {
             if (totals.net < 0) c.expense else c.text,
             Modifier.weight(1f),
         )
+    }
+}
+
+/**
+ * The one line that says the ledger is being read through an account.
+ *
+ * A single control: tapping it anywhere gives every account back. There is
+ * no way to end up looking at one account without this being on screen.
+ */
+@Composable
+private fun FilterChip(
+    account: com.hanifedma.tally.core.AccountRow,
+    balance: Long,
+    fmt: Fmt,
+    onClear: () -> Unit,
+) {
+    val c = LocalTallyColors.current
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(999.dp))
+            .background(c.surface2)
+            .border(1.dp, c.border, RoundedCornerShape(999.dp))
+            .clickable(onClick = onClear)
+            .semantics { contentDescription = fmt.t("filter.clear") }
+            .padding(start = 6.dp, end = 10.dp, top = 5.dp, bottom = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        IconChip(accountGlyph(account.kind), c.named(account.color), 24.dp, 12.sp)
+        // The name takes the room that is going, which pushes the balance to
+        // the far end and makes the name the part that gives way when there
+        // is not enough. That way round on purpose: a shortened name still
+        // says which account this is, where a shortened number would be a
+        // wrong number.
+        Text(
+            account.name,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.Medium,
+            color = c.text,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            fmt.money(balance, account.currency),
+            style = MaterialTheme.typography.labelMedium,
+            color = c.muted,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text("✕", style = MaterialTheme.typography.labelMedium, color = c.faint)
     }
 }
 

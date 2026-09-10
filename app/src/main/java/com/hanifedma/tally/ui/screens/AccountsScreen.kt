@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -19,10 +20,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.hanifedma.tally.core.AccountRow
 import com.hanifedma.tally.core.Compute
 import com.hanifedma.tally.core.Ledger
@@ -49,6 +53,7 @@ fun AccountsScreen(
     showArchived: Boolean,
     contentPadding: androidx.compose.foundation.layout.PaddingValues,
     onOpen: (AccountRow) -> Unit,
+    onEdit: (AccountRow) -> Unit,
     onAdd: () -> Unit,
     onToggleArchived: () -> Unit,
 ) {
@@ -104,6 +109,7 @@ fun AccountsScreen(
                         ledger = ledger,
                         fmt = fmt,
                         onClick = { onOpen(account) },
+                        onEdit = { onEdit(account) },
                     )
                     if (index != visible.lastIndex) Divider()
                 }
@@ -136,6 +142,7 @@ private fun AccountRowView(
     ledger: Ledger,
     fmt: Fmt,
     onClick: () -> Unit,
+    onEdit: () -> Unit,
 ) {
     val c = LocalTallyColors.current
     val converted = if (account.currency != ledger.ctx.main) {
@@ -145,57 +152,75 @@ private fun AccountRowView(
         )
     } else null
 
+    // Two controls, not one: tapping the account shows its money, which is
+    // what anyone opens this screen to do, and the pencil beside it changes
+    // the account itself. Either is one tap.
     Row(
-        Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .alpha(if (account.archived) 0.55f else 1f)
-            .padding(horizontal = 13.dp, vertical = 12.dp),
+        Modifier.fillMaxWidth().alpha(if (account.archived) 0.55f else 1f),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(11.dp),
     ) {
-        IconChip(accountGlyph(account.kind), c.named(account.color), 34.dp)
-        Column(Modifier.weight(1f)) {
-            Text(
-                account.name,
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.Medium,
-                color = c.text,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                buildString {
-                    append(fmt.t("acc.kind." + account.kind))
-                    append(" · ")
-                    append(account.currency)
-                    if (account.archived) {
-                        append(" · ")
-                        append(fmt.t("acc.archived"))
-                    }
-                },
-                style = MaterialTheme.typography.labelMedium,
-                color = c.faint,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        Column(horizontalAlignment = Alignment.End) {
-            Text(
-                fmt.money(balance, account.currency),
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.SemiBold,
-                color = if (balance < 0) c.expense else c.text,
-                maxLines = 1,
-            )
-            if (converted != null) {
+        Row(
+            Modifier
+                .weight(1f)
+                .clickable(onClick = onClick)
+                .padding(start = 13.dp, end = 4.dp, top = 12.dp, bottom = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(11.dp),
+        ) {
+            IconChip(accountGlyph(account.kind), c.named(account.color), 34.dp)
+            Column(Modifier.weight(1f)) {
                 Text(
-                    fmt.t("acc.inMain", mapOf("amount" to fmt.money(converted))),
-                    style = MaterialTheme.typography.labelSmall,
+                    account.name,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Medium,
+                    color = c.text,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    buildString {
+                        append(fmt.t("acc.kind." + account.kind))
+                        append(" · ")
+                        append(account.currency)
+                        if (account.archived) {
+                            append(" · ")
+                            append(fmt.t("acc.archived"))
+                        }
+                    },
+                    style = MaterialTheme.typography.labelMedium,
                     color = c.faint,
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    fmt.money(balance, account.currency),
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (balance < 0) c.expense else c.text,
+                    maxLines = 1,
+                )
+                if (converted != null) {
+                    Text(
+                        fmt.t("acc.inMain", mapOf("amount" to fmt.money(converted))),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = c.faint,
+                        maxLines = 1,
+                    )
+                }
+            }
+        }
+        Box(
+            Modifier
+                .padding(end = 5.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .clickable(onClick = onEdit)
+                .padding(11.dp)
+                .semantics { contentDescription = fmt.t("acc.edit") + " · " + account.name },
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("✏️", fontSize = 15.sp)
         }
     }
 }

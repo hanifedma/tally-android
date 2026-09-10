@@ -130,7 +130,7 @@ fun AccountEditorSheet(
     var opening by remember {
         mutableStateOf(
             existing?.takeIf { it.openingMinor != 0L }
-                ?.let { Money.minorToInput(it.openingMinor, it.currency) } ?: ""
+                ?.let { Money.groupAmount(Money.minorToInput(it.openingMinor, it.currency)) } ?: ""
         )
     }
     var colour by remember { mutableStateOf(existing?.color ?: "indigo") }
@@ -144,7 +144,7 @@ fun AccountEditorSheet(
         existing?.kind ?: "cash",
         existing?.currency ?: ledger.ctx.main,
         existing?.takeIf { it.openingMinor != 0L }
-            ?.let { Money.minorToInput(it.openingMinor, it.currency) } ?: "",
+            ?.let { Money.groupAmount(Money.minorToInput(it.openingMinor, it.currency)) } ?: "",
         existing?.color ?: "indigo",
         existing?.archived ?: false,
     )
@@ -178,7 +178,7 @@ fun AccountEditorSheet(
             Spacer(Modifier.height(14.dp))
 
             FieldLabel(fmt.t("acc.opening") + " · " + currency)
-            PlainField(opening, "0", numeric = true, alignEnd = true) { opening = it; error = null }
+            MoneyField(opening, "0") { opening = it; error = null }
             Help(fmt.t("acc.openingHelp"), Modifier.padding(top = 6.dp))
             Spacer(Modifier.height(14.dp))
 
@@ -504,10 +504,10 @@ fun BudgetsSheet(
     val values = remember {
         val initial = LinkedHashMap<String, String>()
         initial[""] = existingByCategory[null]
-            ?.let { Money.minorToInput(it.amountMinor, it.currency) } ?: ""
+            ?.let { Money.groupAmount(Money.minorToInput(it.amountMinor, it.currency)) } ?: ""
         for (category in categories) {
             initial[category.id] = existingByCategory[category.id]
-                ?.let { Money.minorToInput(it.amountMinor, it.currency) } ?: ""
+                ?.let { Money.groupAmount(Money.minorToInput(it.amountMinor, it.currency)) } ?: ""
         }
         androidx.compose.runtime.mutableStateMapOf<String, String>().apply { putAll(initial) }
     }
@@ -589,7 +589,7 @@ private fun BudgetRowField(
             modifier = Modifier.width(96.dp),
         )
         Box(Modifier.weight(1f)) {
-            PlainField(value, fmt.t("bud.none"), numeric = true, alignEnd = true, onChange = onChange)
+            MoneyField(value, fmt.t("bud.none"), onChange = onChange)
         }
         Text(currency, style = MaterialTheme.typography.labelMedium, color = c.faint)
     }

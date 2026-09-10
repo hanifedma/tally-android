@@ -238,6 +238,128 @@ object Money {
     }
 
     // ------------------------------------------------------------
+    //  Thousands separators, while it is still being typed
+    // ------------------------------------------------------------
+
+    private const val GROUP_SEPARATOR = ','
+
+    // Char.isDigit accepts every digit Unicode knows, Devanagari and
+    // Arabic-Indic included, and none of those are numbers this field can
+    // parse. money.js compares against '0'..'9'; so does this.
+    private fun Char.isPlainDigit() = this in '0'..'9'
+
+    /**
+     * Put the separators into an amount someone is writing: "1000000.54"
+     * reads back "1,000,000.54" before they have finished the sentence.
+     *
+     * Only the whole part of a number is grouped — the places after the point
+     * are a fraction, not thousands, so "1000.5555" is "1,000.5555" and never
+     * "1,000.555,5". Everything that is not a digit stays exactly where it
+     * stood, so the arithmetic this field allows still reads as arithmetic:
+     * "1000+2000" becomes "1,000+2,000".
+     *
+     * Separators already in the text come out before any go back in. They
+     * belong to the app, not to the person typing: every reader of an amount
+     * strips them before parsing, so where they sit can never change what the
+     * amount means. Character for character the same as groupAmount in
+     * money.js.
+     */
+    fun groupAmount(input: String?): String {
+        val src = (input ?: "").filterNot { it == GROUP_SEPARATOR }
+        val out = StringBuilder()
+        var i = 0
+        while (i < src.length) {
+            val ch = src[i]
+            if (ch.isPlainDigit()) {
+                var j = i
+                while (j < src.length && src[j].isPlainDigit()) j++
+                val whole = src.substring(i, j)
+                for ((k, digit) in whole.withIndex()) {
+                    if (k > 0 && (whole.length - k) % 3 == 0) out.append(GROUP_SEPARATOR)
+                    out.append(digit)
+                }
+                i = j
+            } else {
+                out.append(ch)
+                i++
+                // The point belongs to the number in front of it, and what
+                // follows it is a fraction — passed through untouched.
+                if (ch == '.') {
+                    while (i < src.length && src[i].isPlainDigit()) out.append(src[i++])
+                }
+            }
+        }
+        return out.toString()
+    }
+
+    /** Grouped text, and where the caret belongs in it. */
+    data class Typed(val text: String, val caret: Int)
+
+    /**
+     * Where the separator went missing between [before] and [raw], or -1.
+     *
+     * True only when the two differ by exactly one separator and nothing
+     * else — a keystroke that landed on a comma and took it away.
+     */
+    private fun separatorRubbedOut(before: String, raw: String): Int {
+        if (before.length != raw.length + 1) return -1
+        var i = 0
+        while (i < raw.length && before[i] == raw[i]) i++
+        if (before[i] != GROUP_SEPARATOR) return -1
+        return if (before.substring(i + 1) == raw.substring(i)) i else -1
+    }
+
+    /**
+     * The same grouping, for a field being typed into: it also says where the
+     * caret belongs once the separators have moved.
+     *
+     * The caret is placed by counting, not by arithmetic on lengths: whatever
+     * the person had written to the left of it is still to the left of it
+     * afterwards, however many separators came or went in between.
+     *
+     * A separator is the app's own, so rubbing one out would only put it
+     * straight back and the key would appear to have done nothing. A
+     * backspace that lands on one therefore takes the digit in front of it —
+     * which is what pressing it meant — and a forward delete takes the digit
+     * after.
+     */
+    fun groupAmountEdit(
+        before: String?,
+        raw: String?,
+        caret: Int,
+        forward: Boolean = false,
+    ): Typed {
+        var src = raw ?: ""
+        var at = caret.coerceIn(0, src.length)
+
+        val gone = separatorRubbedOut(before ?: "", src)
+        if (gone >= 0) {
+            // `gone` is where the separator stood. In `src`, which no longer
+            // has it, the digit before it sits at gone - 1 and the one after
+            // it at gone.
+            val take = if (forward) gone else gone - 1
+            if (take >= 0 && take < src.length) {
+                src = src.removeRange(take, take + 1)
+                at = take
+            }
+        }
+
+        val text = groupAmount(src)
+        var want = 0
+        for (i in 0 until at) if (src[i] != GROUP_SEPARATOR) want++
+        var seen = 0
+        var out = text.length
+        for (i in text.indices) {
+            if (seen == want) {
+                out = i
+                break
+            }
+            if (text[i] != GROUP_SEPARATOR) seen++
+        }
+        return Typed(text, out)
+    }
+
+    // ------------------------------------------------------------
     //  Exchange
     // ------------------------------------------------------------
 

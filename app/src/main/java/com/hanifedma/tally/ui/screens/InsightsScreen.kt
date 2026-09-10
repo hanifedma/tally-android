@@ -51,24 +51,37 @@ fun InsightsScreen(
     fmt: Fmt,
     period: Dates.Period,
     showIncome: Boolean,
+    /** Every account, or the one being shown — see LogScreen. */
+    transactions: List<com.hanifedma.tally.core.TransactionRow>,
+    /** The account being shown, when there is one. */
+    filtered: com.hanifedma.tally.core.AccountRow?,
     contentPadding: androidx.compose.foundation.layout.PaddingValues,
     onShowIncome: (Boolean) -> Unit,
     onEditBudgets: () -> Unit,
     onPickPeriod: (String) -> Unit,
 ) {
-    val rows = Compute.inPeriod(ledger.transactions, period)
+    val rows = Compute.inPeriod(transactions, period)
 
     LazyColumn(
         Modifier.fillMaxWidth(),
         contentPadding = contentPadding,
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        item("budget") { BudgetCard(ledger, fmt, period, rows, onEditBudgets) }
+        // Budgets are set across every account, so they are counted across
+        // every account: cutting them to one would show a limit half spent
+        // that is really all spent.
+        item("budget") {
+            BudgetCard(
+                ledger, fmt, period,
+                Compute.inPeriod(ledger.transactions, period),
+                filtered, onEditBudgets,
+            )
+        }
         item("breakdown") { BreakdownCard(ledger, fmt, rows, showIncome, onShowIncome) }
         if (rows.isNotEmpty()) {
             item("stats") { StatsCard(ledger, fmt, period, rows) }
         }
-        item("trend") { TrendCard(ledger, fmt, period, onPickPeriod) }
+        item("trend") { TrendCard(ledger, fmt, period, transactions, onPickPeriod) }
         item("tail") { Spacer(Modifier.height(4.dp)) }
     }
 }
@@ -83,6 +96,7 @@ private fun BudgetCard(
     fmt: Fmt,
     period: Dates.Period,
     rows: List<com.hanifedma.tally.core.TransactionRow>,
+    filtered: com.hanifedma.tally.core.AccountRow?,
     onEdit: () -> Unit,
 ) {
     val c = LocalTallyColors.current
@@ -97,6 +111,14 @@ private fun BudgetCard(
         if (progress.isEmpty()) {
             Help(fmt.t("ins.budgetNone.p"))
             return@Card
+        }
+        // Said out loud, because every other card on this screen is showing
+        // one account and this one is not.
+        if (filtered != null) {
+            Help(
+                fmt.t("ins.budgetAllAccounts", mapOf("name" to filtered.name)),
+                Modifier.padding(bottom = 12.dp),
+            )
         }
         val pace = Dates.paceThrough(period).toFloat()
         progress.forEachIndexed { index, b ->
@@ -318,19 +340,14 @@ private fun StatsCard(
     rows: List<com.hanifedma.tally.core.TransactionRow>,
 ) {
     val totals = Compute.totals(rows, ledger.ctx)
-    val days = period.days
     val elapsed = Dates.elapsedDays(period)
     val perDay = if (elapsed > 0) totals.expense / elapsed else 0L
-    val projected = if (elapsed > 0) perDay * days else totals.expense
 
     val biggest = rows.filter { it.kind == "expense" }
         .maxByOrNull { Money.toMain(it, ledger.ctx) }
 
     Card {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Stat(fmt.t("ins.avgDay"), fmt.money(perDay), Modifier.weight(1f))
-            Stat(fmt.t("ins.avgProjected"), fmt.money(projected), Modifier.weight(1f))
-        }
+        Stat(fmt.t("ins.avgDay"), fmt.money(perDay), Modifier.fillMaxWidth())
         if (biggest != null) {
             Spacer(Modifier.height(10.dp))
             Stat(
@@ -386,10 +403,16 @@ private fun Stat(label: String, value: String, modifier: Modifier = Modifier, no
 // ------------------------------------------------------------
 
 @Composable
-private fun TrendCard(ledger: Ledger, fmt: Fmt, period: Dates.Period, onPick: (String) -> Unit) {
+private fun TrendCard(
+    ledger: Ledger,
+    fmt: Fmt,
+    period: Dates.Period,
+    transactions: List<com.hanifedma.tally.core.TransactionRow>,
+    onPick: (String) -> Unit,
+) {
     val c = LocalTallyColors.current
     val months = Compute.byPeriod(
-        ledger.transactions, period.start, 6, ledger.settings.monthStart, ledger.ctx
+        transactions, period.start, 6, ledger.settings.monthStart, ledger.ctx
     )
     val peak = maxOf(1L, months.maxOfOrNull { maxOf(it.income, it.expense) } ?: 1L)
 
