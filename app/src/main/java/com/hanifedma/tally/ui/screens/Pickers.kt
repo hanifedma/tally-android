@@ -18,9 +18,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -37,6 +40,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -189,6 +194,17 @@ fun SheetFooter(content: @Composable androidx.compose.foundation.layout.RowScope
 //  Date and time
 // ------------------------------------------------------------
 
+/**
+ * What Material's date picker measures out to: seven columns of calendar and
+ * the header around them, and the row of buttons under it. None of these are
+ * sizes this code chooses — they are what the picker takes — and they are
+ * here only so that a window too small to hold it can be recognised before it
+ * draws itself over its own edges.
+ */
+private val DIALOG_WIDTH = 360.dp
+private val PICKER_HEIGHT = 568.dp
+private val BUTTONS_HEIGHT = 72.dp
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DatePickerSheet(initial: String, fmt: Fmt, onPick: (String) -> Unit, onDismiss: () -> Unit) {
@@ -197,7 +213,51 @@ fun DatePickerSheet(initial: String, fmt: Fmt, onPick: (String) -> Unit, onDismi
     // "the 31st" from becoming "the 30th" for anyone west of Greenwich.
     val startMillis = Dates.parse(initial).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
     val state = rememberDatePickerState(initialSelectedDateMillis = startMillis)
-    AlertDialog(
+    // DatePickerDialog, not the AlertDialog the other sheets here use.
+    //
+    // A calendar is seven columns of a fixed width — the grid does not reflow
+    // and does not shrink — and an AlertDialog is as wide as the platform
+    // says a dialog is, less 24dp of padding down each side for its text. On
+    // a 360dp phone that leaves about 312 for 360dp of calendar, and the
+    // Saturday column is what falls off the right: the header reads "FS" with
+    // the two letters on top of each other, and the 11th, 18th and 25th are
+    // sliced in half. This dialog is the one Material ships for the job and
+    // sizes itself to the picker instead.
+    //
+    // That fixes 360dp and wider, which is most phones, and moves the problem
+    // rather than solving it on anything smaller: the dialog is then wider
+    // than the window and it is the buttons that go over the edge, with Done
+    // half off the right. A window is under 360dp on a small phone and on any
+    // phone with the display size turned up, which is the same screen
+    // measured in fewer dp. So what does not fit is scaled until it does.
+    // Compose maps touches through the transform, so the days stay where they
+    // look.
+    //
+    // Width only, because height needs the other half of the answer below.
+    val window = LocalConfiguration.current
+    val fit = minOf(1f, (window.screenWidthDp.dp - 16.dp) / DIALOG_WIDTH)
+
+    // Landscape, where there is nothing like 568dp of window to put a
+    // calendar in. Left alone the picker does not shrink and does not
+    // scroll — it draws itself at full size in a box too short for it and
+    // lets the pieces land on top of each other, so the weekday letters sit
+    // across the first row of dates and Cancel and Done sit across the last.
+    // Scaling it down does not help either: the squeeze happens first, and
+    // all scaling does is make the overlap smaller.
+    //
+    // So in a short window the calendar keeps its full height and is given
+    // somewhere to scroll instead. Two rows of the month at a time is not
+    // generous, but every date is reachable and nothing is drawn over
+    // anything else — and the two commonest answers, today and yesterday,
+    // are buttons in the editor behind this and never need it at all.
+    val room = window.screenHeightDp.dp
+    val scrolls = room < PICKER_HEIGHT + BUTTONS_HEIGHT
+    DatePickerDialog(
+        modifier = if (fit < 1f) {
+            Modifier.graphicsLayer { scaleX = fit; scaleY = fit }
+        } else {
+            Modifier
+        },
         onDismissRequest = onDismiss,
         confirmButton = {
             TextButton(onClick = {
@@ -209,8 +269,32 @@ fun DatePickerSheet(initial: String, fmt: Fmt, onPick: (String) -> Unit, onDismi
             }) { Text(fmt.t("done")) }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text(fmt.t("cancel")) } },
-        text = { DatePicker(state = state, showModeToggle = false) },
-    )
+    ) {
+        if (scrolls) {
+            // Capped so the buttons below keep their room, and scrolled so
+            // the calendar can be its full self inside it.
+            //
+            // Without the title and the headline, which between them are a
+            // third of the picker's height and are spending it to say a date
+            // the editor behind this is already showing. Dropping them buys
+            // back three rows of the month, which is the difference between a
+            // calendar and a peephole.
+            Box(
+                Modifier
+                    .heightIn(max = room - BUTTONS_HEIGHT)
+                    .verticalScroll(rememberScrollState())
+            ) {
+                DatePicker(
+                    state = state,
+                    title = null,
+                    headline = null,
+                    showModeToggle = false,
+                )
+            }
+        } else {
+            DatePicker(state = state, showModeToggle = false)
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

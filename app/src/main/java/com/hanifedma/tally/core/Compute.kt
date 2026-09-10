@@ -261,6 +261,44 @@ object Compute {
         return out
     }
 
+    /**
+     * What the last transfer between these two accounts cost, in minor units
+     * of the sending account's currency, or null if there is nothing to go on.
+     *
+     * Direction is part of the question. A bank charges to send money to a
+     * wallet and often charges nothing to pull it back, so A to B and B to A
+     * are two different answers and must not be averaged into one.
+     *
+     * So is the currency. The number remembered is minor units of whatever
+     * the sending account held at the time, and an account whose currency has
+     * been changed since cannot be quoted its old fee — 500 rupiah is not 500
+     * won.
+     *
+     * The most recent transfer wins outright, including when it was free. The
+     * last time this move cost nothing is the best evidence there is that it
+     * is free now, and an older fee should not be allowed to resurrect itself
+     * behind a bank's fee change.
+     */
+    fun lastTransferFee(
+        transactions: List<TransactionRow>,
+        fromId: String?,
+        toId: String?,
+        currency: String?,
+    ): Long? {
+        if (fromId.isNullOrEmpty() || toId.isNullOrEmpty() || fromId == toId) return null
+        var best: TransactionRow? = null
+        for (t in transactions) {
+            if (t.deletedAt != null) continue
+            if (t.kind != "transfer") continue
+            if (t.accountId != fromId || t.toAccountId != toId) continue
+            if (!currency.isNullOrEmpty() && t.currency != currency) continue
+            val found = best
+            if (found == null || newestFirst.compare(t, found) < 0) best = t
+        }
+        // Zero is an answer, not an absence: the last one was free.
+        return best?.feeMinor
+    }
+
     /** Free text across notes, category names and account names. */
     fun search(
         transactions: List<TransactionRow>,

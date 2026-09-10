@@ -40,6 +40,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hanifedma.tally.core.Calc
+import com.hanifedma.tally.core.Compute
 import com.hanifedma.tally.core.Dates
 import com.hanifedma.tally.core.Ids
 import com.hanifedma.tally.core.Ledger
@@ -166,6 +167,12 @@ fun EditorSheet(
     var noteFocused by remember { mutableStateOf(false) }
     var noteDismissed by remember { mutableStateOf(false) }
 
+    // Whether the fee has been typed in during this edit. A fact about the
+    // editing, not about the transaction, which is why it lives here and not
+    // on the draft: once it is true, no later change of account may overwrite
+    // what the person put there themselves.
+    var feeTouched by remember { mutableStateOf(false) }
+
     // The amount field owns its own caret: the operator buttons append to it
     // and have to be able to put the cursor after what they inserted.
     var amountField by remember {
@@ -191,6 +198,25 @@ fun EditorSheet(
     val category = ledger.category(draft.categoryId)
     val minor = Money.parseToMinor(draft.amount, currency)
 
+    /**
+     * The same transfer as the fee it cost last time.
+     *
+     * Only for a new transfer, and only until the fee has been typed in: an
+     * existing transaction already knows what it cost, and a number the
+     * person put there themselves outranks anything the ledger remembers. A
+     * pair with no history, or whose last transfer was free, leaves the field
+     * blank rather than writing a nought into it.
+     */
+    fun withSuggestedFee(d: Draft): Draft {
+        if (existing != null || feeTouched) return d
+        val was = Compute.lastTransferFee(
+            ledger.transactions, d.accountId, d.toAccountId, d.currency,
+        )
+        return d.copy(
+            fee = if (was != null && was != 0L) Money.minorToInput(was, d.currency) else "",
+        )
+    }
+
     fun save(another: Boolean) {
         val problem = Money.validate(
             draft.amount, currency, draft.kind,
@@ -209,10 +235,17 @@ fun EditorSheet(
                 amount = "",
                 note = "",
                 toAmount = "",
-                fee = "",
+                // The fee stays. The transfer just filed is now the last one
+                // between this pair, so what it cost is exactly what the next
+                // one would be told to expect — and taking it from the draft
+                // rather than asking the ledger avoids racing the save, which
+                // has not reached it yet.
                 occurredMin = Dates.minuteOfDay(),
                 createdAt = null,
             )
+            // Typing a fee governs the transfer it was typed for, not every
+            // transfer after it, so a change of account may fill it in again.
+            feeTouched = false
             amountField = TextFieldValue("")
             noteField = TextFieldValue("")
         }
@@ -236,22 +269,30 @@ fun EditorSheet(
                 val next = when (index) { 1 -> "income"; 2 -> "transfer"; else -> "expense" }
                 if (next != draft.kind) {
                     draft = when (next) {
-                        "transfer" -> draft.copy(
-                            kind = next,
-                            categoryId = null,
-                            toAccountId = draft.toAccountId
-                                ?: ledger.liveAccounts().firstOrNull { it.id != draft.accountId }?.id,
+                        "transfer" -> withSuggestedFee(
+                            draft.copy(
+                                kind = next,
+                                categoryId = null,
+                                toAccountId = draft.toAccountId
+                                    ?: ledger.liveAccounts().firstOrNull { it.id != draft.accountId }?.id,
+                            )
                         )
                         // A category from the other side of the ledger would
                         // be wrong, so drop one that no longer fits.
-                        else -> draft.copy(
-                            kind = next,
-                            toAccountId = null,
-                            toAmount = "",
-                            fee = "",
-                            categoryId = draft.categoryId
-                                ?.takeIf { ledger.category(it)?.kind == next },
-                        )
+                        else -> {
+                            // The typed fee goes with the transfer, so coming
+                            // back to one starts from the ledger again rather
+                            // than from a blank.
+                            feeTouched = false
+                            draft.copy(
+                                kind = next,
+                                toAccountId = null,
+                                toAmount = "",
+                                fee = "",
+                                categoryId = draft.categoryId
+                                    ?.takeIf { ledger.category(it)?.kind == next },
+                            )
+                        }
                     }
                     error = null
                 }
@@ -372,13 +413,15 @@ fun EditorSheet(
             ) {
                 onPickAccount(draft.accountId) { id ->
                     val picked = ledger.account(id)
-                    draft = draft.copy(
-                        accountId = id,
-                        currency = picked?.currency ?: currency,
-                        // A new currency needs a new frozen rate; keeping the
-                        // old one would price rupiah at the won rate.
-                        rate = picked?.let { Money.rateForNew(it.currency, ctx) } ?: draft.rate,
-                        rateBase = ctx.main,
+                    draft = withSuggestedFee(
+                        draft.copy(
+                            accountId = id,
+                            currency = picked?.currency ?: currency,
+                            // A new currency needs a new frozen rate; keeping
+                            // the old one would price rupiah at the won rate.
+                            rate = picked?.let { Money.rateForNew(it.currency, ctx) } ?: draft.rate,
+                            rateBase = ctx.main,
+                        )
                     )
                     error = null
                 }
@@ -393,7 +436,7 @@ fun EditorSheet(
                     leading = { IconChip(accountGlyph(toAccount?.kind ?: "cash"), toAccount?.let { c.named(it.color) }, 26.dp, 13.sp) },
                 ) {
                     onPickAccount(draft.toAccountId) { id ->
-                        draft = draft.copy(toAccountId = id)
+                        draft = withSuggestedFee(draft.copy(toAccountId = id))
                         error = null
                     }
                 }
@@ -409,6 +452,9 @@ fun EditorSheet(
                     alignEnd = true,
                 ) {
                     draft = draft.copy(fee = it)
+                    // From here on this transfer's fee is the person's, not
+                    // the ledger's.
+                    feeTouched = true
                     error = null
                 }
                 Help(

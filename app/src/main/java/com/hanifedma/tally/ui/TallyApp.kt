@@ -3,6 +3,7 @@ package com.hanifedma.tally.ui
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -45,6 +46,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -316,7 +318,42 @@ fun TallyApp(vm: TallyViewModel) {
                 top = 6.dp,
                 bottom = 92.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding(),
             )
-            Box(Modifier.fillMaxSize().padding(top = padding.calculateTopPadding())) {
+            // Swipe sideways to change the month, the way a calendar turns.
+            //
+            // Only where a month is what is on screen. The accounts tab shows
+            // balances as they stand today and has no period to move, and a
+            // search reaches across all of them — changing the month behind
+            // either would be a silent edit to something the screen is not
+            // showing.
+            //
+            // Vertical scrolling is untouched: the lists below get the
+            // gesture first and only ever claim vertical drags, so a
+            // horizontal one falls through to here, and this never sees a
+            // gesture the list has already taken.
+            val swipesMonths = !ui.searching && ui.tab != TallyViewModel.Tab.ACCOUNTS
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .padding(top = padding.calculateTopPadding())
+                    .then(
+                        if (!swipesMonths) Modifier else Modifier.pointerInput(ui.tab) {
+                            // Far enough to be a swipe rather than a wobble
+                            // during a tap or a vertical scroll.
+                            val enough = 72.dp.toPx()
+                            var travelled = 0f
+                            detectHorizontalDragGestures(
+                                onDragStart = { travelled = 0f },
+                                onDragCancel = { travelled = 0f },
+                                onDragEnd = {
+                                    when {
+                                        travelled <= -enough -> vm.shiftPeriod(1)
+                                        travelled >= enough -> vm.shiftPeriod(-1)
+                                    }
+                                },
+                            ) { _, delta -> travelled += delta }
+                        }
+                    )
+            ) {
                 when (ui.tab) {
                     TallyViewModel.Tab.LOG -> LogScreen(
                         ledger, fmt, period, ui.searching, ui.search,
@@ -789,6 +826,29 @@ private fun IconButton(glyph: String, small: Boolean = false, onClick: () -> Uni
     }
 }
 
+/**
+ * A month back, a month on.
+ *
+ * Bigger than the IconButton the rest of the chrome uses. These are the two
+ * most-tapped controls in the app and were sharing a size with buttons
+ * pressed once a session, which put them under the 48dp a fingertip
+ * actually wants. The glyph grows with the target, so it reads as a larger
+ * button rather than a small one with room around it.
+ */
+@Composable
+private fun PeriodArrow(glyph: String, onClick: () -> Unit) {
+    val c = LocalTallyColors.current
+    Box(
+        Modifier
+            .size(48.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(glyph, color = c.muted, fontSize = 27.sp)
+    }
+}
+
 @Composable
 private fun PeriodBar(vm: TallyViewModel, fmt: Fmt, period: Dates.Period, monthStart: Int) {
     val c = LocalTallyColors.current
@@ -797,7 +857,7 @@ private fun PeriodBar(vm: TallyViewModel, fmt: Fmt, period: Dates.Period, monthS
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center,
     ) {
-        IconButton("‹") { vm.shiftPeriod(-1) }
+        PeriodArrow("‹") { vm.shiftPeriod(-1) }
         Column(
             Modifier
                 .clip(RoundedCornerShape(9.dp))
@@ -824,7 +884,7 @@ private fun PeriodBar(vm: TallyViewModel, fmt: Fmt, period: Dates.Period, monthS
                 )
             }
         }
-        IconButton("›") { vm.shiftPeriod(1) }
+        PeriodArrow("›") { vm.shiftPeriod(1) }
     }
 }
 

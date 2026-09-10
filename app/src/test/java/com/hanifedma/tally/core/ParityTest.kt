@@ -414,6 +414,50 @@ class ParityTest {
         assertEquals(50000L + 1142857L, b["a2"])
     }
 
+    private fun move(fee: Long, on: String = "2026-08-30", from: String? = "a1", to: String? = "a3", currency: String = "KRW") =
+        tx(30000, currency = currency, kind = "transfer", accountId = from, toAccountId = to, fee = fee, occurredOn = on)
+
+    @Test
+    fun `a transfer remembers what the last one between the same two cost`() {
+        val older = move(300, on = "2026-08-01")
+        assertEquals(300L, Compute.lastTransferFee(listOf(older), "a1", "a3", "KRW"))
+
+        val rows = listOf(older, move(500, on = "2026-08-20"))
+        assertEquals(500L, Compute.lastTransferFee(rows, "a1", "a3", "KRW"))
+
+        assertEquals(null, Compute.lastTransferFee(rows, "a1", "a2", "KRW"))
+        assertEquals(null, Compute.lastTransferFee(rows, "a1", "a1", "KRW"))
+    }
+
+    @Test
+    fun `the way round is part of the question a remembered fee answers`() {
+        val rows = listOf(move(500))
+        assertEquals(500L, Compute.lastTransferFee(rows, "a1", "a3", "KRW"))
+        // A bank that charges to send need not charge to receive.
+        assertEquals(null, Compute.lastTransferFee(rows, "a3", "a1", "KRW"))
+    }
+
+    @Test
+    fun `a free transfer is remembered as free, not as the fee before it`() {
+        val rows = listOf(move(500, on = "2026-08-01"), move(0, on = "2026-08-20"))
+        assertEquals(0L, Compute.lastTransferFee(rows, "a1", "a3", "KRW"))
+    }
+
+    @Test
+    fun `a remembered fee is not carried across a change of currency or a deletion`() {
+        // 500 won is not 500 rupiah.
+        assertEquals(null, Compute.lastTransferFee(listOf(move(500)), "a1", "a3", "IDR"))
+
+        val gone = move(500).copy(deletedAt = "2026-08-21T00:00:00Z")
+        assertEquals(null, Compute.lastTransferFee(listOf(gone), "a1", "a3", "KRW"))
+
+        val mixed = listOf(
+            move(500, on = "2026-08-20"),
+            move(7000, on = "2026-08-01", currency = "IDR"),
+        )
+        assertEquals(7000L, Compute.lastTransferFee(mixed, "a1", "a3", "IDR"))
+    }
+
     @Test
     fun `only a transfer can carry a fee`() {
         assertEquals(0L, TransactionRow(id = "1", kind = "expense", feeMinor = 900).normalized().feeMinor)
