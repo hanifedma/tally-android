@@ -283,6 +283,11 @@ class LedgerRepository(
         }
 
         private fun onRecord(record: JsonObject) {
+            // Only a row with this table's own columns — see
+            // Compute.rowFitsTable. Decoding is too forgiving to be the check:
+            // every column has a default, so a transaction decodes happily as
+            // a category with no name.
+            if (!com.hanifedma.tally.core.Compute.rowFitsTable(name, record.keys)) return
             val row = try {
                 Supabase.json.decodeFromJsonElement(serializer, record)
             } catch (e: Exception) {

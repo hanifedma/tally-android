@@ -209,6 +209,41 @@ class ParityTest {
         assertEquals(rows, Compute.forAccount(rows, ""))
     }
 
+    @Test
+    fun `a realtime change is taken only by the table it belongs to`() {
+        // Every column each table really sends, as schema.sql defines them.
+        val columns = mapOf(
+            "categories" to setOf(
+                "id", "user_id", "name", "kind", "icon", "color", "archived", "position",
+                "created_at", "updated_at", "deleted_at",
+            ),
+            "transactions" to setOf(
+                "id", "user_id", "kind", "amount_minor", "currency", "rate", "rate_base",
+                "account_id", "to_account_id", "to_amount_minor", "fee_minor", "category_id",
+                "note", "occurred_on", "occurred_min", "created_at", "updated_at", "deleted_at",
+            ),
+            "accounts" to setOf(
+                "id", "user_id", "name", "kind", "currency", "opening_minor", "color", "archived",
+                "position", "created_at", "updated_at", "deleted_at",
+            ),
+            "budgets" to setOf(
+                "id", "user_id", "category_id", "amount_minor", "currency",
+                "created_at", "updated_at", "deleted_at",
+            ),
+            "settings" to setOf(
+                "user_id", "main_currency", "theme", "lang", "week_start", "month_start", "rates",
+                "created_at", "updated_at",
+            ),
+        )
+        for ((table, cols) in columns) {
+            for (other in columns.keys) {
+                assertEquals("$table row read as $other", other == table, Compute.rowFitsTable(other, cols))
+            }
+        }
+        assertFalse(Compute.rowFitsTable("categories", setOf("id")))
+        assertFalse(Compute.rowFitsTable("nowhere", columns.getValue("categories")))
+    }
+
     // ------------------------------------------------------------
     //  Thousands separators while typing
     // ------------------------------------------------------------

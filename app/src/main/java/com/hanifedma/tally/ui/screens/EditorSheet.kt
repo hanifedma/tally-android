@@ -5,6 +5,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -31,10 +32,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.KeyboardType
@@ -51,6 +54,8 @@ import com.hanifedma.tally.core.Money
 import com.hanifedma.tally.core.TransactionRow
 import com.hanifedma.tally.ui.Fmt
 import com.hanifedma.tally.ui.accountGlyph
+import com.hanifedma.tally.ui.components.BUTTON_SIDE_PADDING
+import com.hanifedma.tally.ui.components.COMPACT_BUTTON_SIDE_PADDING
 import com.hanifedma.tally.ui.components.Divider
 import com.hanifedma.tally.ui.components.FieldLabel
 import com.hanifedma.tally.ui.components.GhostButton
@@ -648,27 +653,12 @@ fun EditorSheet(
 
         // ---- footer ----
         Divider()
-        Row(
-            Modifier.fillMaxWidth().padding(16.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            if (existing != null) {
-                // A bin rather than the word "Delete", which is what the web
-                // does here and for the same reason: three labelled buttons
-                // do not fit across a phone, and the one that lost the
-                // argument was "Save & another", which arrived as "Save &".
-                // The label is still there for anyone listening to the screen
-                // rather than looking at it.
-                GhostButton(
-                    "🗑",
-                    danger = true,
-                    compact = true,
-                    modifier = Modifier.semantics { contentDescription = fmt.t("delete") },
-                ) { onDelete(existing) }
-            }
-            GhostButton(fmt.t("tx.saveAnother"), Modifier.weight(1f)) { save(true) }
-            PrimaryButton(fmt.t("tx.save"), Modifier.weight(1f)) { save(false) }
-        }
+        EditorFooter(
+            fmt = fmt,
+            onDelete = existing?.let { tx -> { onDelete(tx) } },
+            onSaveAnother = { save(true) },
+            onSave = { save(false) },
+        )
     }
 
     if (showDate) {
@@ -720,6 +710,89 @@ fun SheetHeader(title: String, onClose: () -> Unit) {
         }
         Divider()
     }
+}
+
+private val FOOTER_GAP = 8.dp
+
+/**
+ * Delete, Save & another and Save: in one row when they fit, in two when
+ * they do not.
+ *
+ * Whether they fit is measured rather than assumed, because nothing here
+ * knows the answer in advance. The labels are drawn in the phone's own font,
+ * at the text size its owner chose, in whichever language is on — and a
+ * wider system font on a 360dp screen is exactly what once turned
+ * "Save & another" into "Save &", on a phone the emulator's wider default
+ * screen never resembled.
+ *
+ * Two rows put Save on its own along the bottom, full width: the same place
+ * the thumb found it in one row, and the one button that must never be
+ * squeezed.
+ *
+ * @param onDelete  null for a transaction not yet saved, which has nothing
+ *                  to delete.
+ */
+@Composable
+private fun EditorFooter(
+    fmt: Fmt,
+    onDelete: (() -> Unit)?,
+    onSaveAnother: () -> Unit,
+    onSave: () -> Unit,
+) {
+    val another = fmt.t("tx.saveAnother")
+    val save = fmt.t("tx.save")
+    val style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold)
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+
+    BoxWithConstraints(Modifier.fillMaxWidth().padding(16.dp)) {
+        // Kept, not re-measured on every keystroke: this sheet recomposes as
+        // the amount is typed, and none of these inputs change while it does.
+        val oneRow = remember(another, save, style, density, onDelete != null, maxWidth) {
+            fun wide(label: String, side: androidx.compose.ui.unit.Dp) = with(density) {
+                measurer.measure(label, style, maxLines = 1, softWrap = false).size.width.toDp()
+            } + side * 2
+            val half = maxOf(wide(another, BUTTON_SIDE_PADDING), wide(save, BUTTON_SIDE_PADDING))
+            val bin = if (onDelete != null) wide(BIN, COMPACT_BUTTON_SIDE_PADDING) + FOOTER_GAP else 0.dp
+            // A couple of dp to spare, so a label that fits to the pixel
+            // on paper is not split between two buttons that round down.
+            bin + half * 2 + FOOTER_GAP <= maxWidth - 2.dp
+        }
+
+        if (oneRow) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(FOOTER_GAP)) {
+                if (onDelete != null) BinButton(fmt, onDelete)
+                GhostButton(another, Modifier.weight(1f), onClick = onSaveAnother)
+                PrimaryButton(save, Modifier.weight(1f), onClick = onSave)
+            }
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(FOOTER_GAP)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(FOOTER_GAP)) {
+                    if (onDelete != null) BinButton(fmt, onDelete)
+                    GhostButton(another, Modifier.weight(1f), onClick = onSaveAnother)
+                }
+                PrimaryButton(save, Modifier.fillMaxWidth(), onClick = onSave)
+            }
+        }
+    }
+}
+
+private const val BIN = "🗑"
+
+/**
+ * A bin rather than the word "Delete", which is what the web does here and
+ * for the same reason: a third word is the one that does not fit. The word is
+ * still there for anyone listening to the screen rather than looking at it.
+ */
+@Composable
+private fun BinButton(fmt: Fmt, onDelete: () -> Unit) {
+    GhostButton(
+        BIN,
+        danger = true,
+        compact = true,
+        modifier = Modifier.semantics { contentDescription = fmt.t("delete") },
+        onClick = onDelete,
+    )
 }
 
 @Composable

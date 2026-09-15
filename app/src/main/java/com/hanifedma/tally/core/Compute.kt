@@ -58,6 +58,36 @@ object Compute {
     fun inPeriod(rows: List<TransactionRow>, period: Dates.Period): List<TransactionRow> =
         rows.filter { it.occurredOn in period }
 
+    // One column no other table has, per table; a budget is the row with an
+    // amount and a category but no date. rowFitsTable in money.js.
+    private val TABLE_SIGNATURE = mapOf(
+        "settings" to listOf("main_currency"),
+        "accounts" to listOf("opening_minor"),
+        "categories" to listOf("icon"),
+        "transactions" to listOf("occurred_on"),
+        "budgets" to listOf("amount_minor", "category_id"),
+    )
+
+    /**
+     * Does a row with these columns belong to [table]?
+     *
+     * supabase-kt hands a realtime change only to the listener whose filter —
+     * table included — the server matched, so on this platform this should
+     * never refuse anything. The web's library does not always, and there a
+     * category read as a transaction became a "+₩0" row nobody entered. The
+     * same check here costs nothing and makes the two apps agree on what they
+     * will take.
+     */
+    fun rowFitsTable(table: String, columns: Set<String>): Boolean {
+        val own = TABLE_SIGNATURE[table] ?: return false
+        if (!columns.containsAll(own)) return false
+        // A transaction has an amount and a category too, so a budget is also
+        // told apart by what it lacks.
+        return TABLE_SIGNATURE.all { (other, cols) ->
+            other == table || other == "budgets" || cols.none { it in columns }
+        }
+    }
+
     /**
      * Everything that touched one account — forAccount in money.js.
      *

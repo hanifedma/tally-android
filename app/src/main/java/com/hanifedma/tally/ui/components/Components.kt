@@ -253,6 +253,13 @@ fun EmptyState(
     }
 }
 
+/**
+ * Room either side of a button's label. Named, so that a row deciding whether
+ * its buttons fit can count the same space the buttons actually take.
+ */
+val BUTTON_SIDE_PADDING = 20.dp
+val COMPACT_BUTTON_SIDE_PADDING = 14.dp
+
 @Composable
 fun PrimaryButton(
     label: String,
@@ -266,7 +273,7 @@ fun PrimaryButton(
             .clip(RoundedCornerShape(11.dp))
             .background(if (enabled) c.accent else c.surface3)
             .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 20.dp, vertical = 11.dp),
+            .padding(horizontal = BUTTON_SIDE_PADDING, vertical = 11.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(
@@ -275,6 +282,12 @@ fun PrimaryButton(
             fontWeight = FontWeight.SemiBold,
             color = if (enabled) c.accentContrast else c.faint,
             maxLines = 1,
+            // Never onto a second line: the button is one line tall, so a
+            // wrapped label loses its end without a trace ("Save &"). A label
+            // that truly cannot fit ends in an ellipsis instead, which at least
+            // says there is more.
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
@@ -300,7 +313,10 @@ fun GhostButton(
             .background(if (danger) c.dangerSoft else Color.Transparent)
             .border(1.dp, if (danger) Color.Transparent else c.borderStrong, RoundedCornerShape(11.dp))
             .clickable(onClick = onClick)
-            .padding(horizontal = if (compact) 14.dp else 20.dp, vertical = 11.dp),
+            .padding(
+                horizontal = if (compact) COMPACT_BUTTON_SIDE_PADDING else BUTTON_SIDE_PADDING,
+                vertical = 11.dp,
+            ),
         contentAlignment = Alignment.Center,
     ) {
         Text(
@@ -309,6 +325,8 @@ fun GhostButton(
             fontWeight = FontWeight.SemiBold,
             color = if (danger) c.danger else c.text,
             maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
