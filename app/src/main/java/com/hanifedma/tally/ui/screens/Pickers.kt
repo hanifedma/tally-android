@@ -32,6 +32,7 @@ import androidx.compose.material3.TimePicker
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -330,11 +331,15 @@ fun RateSheet(
     main: String,
     current: Double?,
     onSave: (Double) -> Unit,
+    onUnsaved: (Boolean) -> Unit,
     onClose: () -> Unit,
 ) {
     val c = LocalTallyColors.current
     var text by remember { mutableStateOf(current?.let { trimTrailingZeros(it) } ?: "") }
     var error by remember { mutableStateOf<String?>(null) }
+    val opened = remember { text }
+    val unsaved = text.trim() != opened.trim()
+    LaunchedEffect(unsaved) { onUnsaved(unsaved) }
 
     Column(Modifier.fillMaxWidth()) {
         SheetHeader(fmt.t("set.rateFor", mapOf("code" to code)) + " " + main, onClose)

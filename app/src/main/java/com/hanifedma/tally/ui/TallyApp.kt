@@ -1,5 +1,6 @@
 package com.hanifedma.tally.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -29,6 +30,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SheetValue
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
@@ -44,6 +46,7 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -279,6 +282,14 @@ fun TallyApp(vm: TallyViewModel) {
             Compute.forAccount(ledger.transactions, filtered?.id)
         }
 
+        // Back undoes the narrowing before it leaves the app: the search
+        // first, then the one account being looked at. Until this, back with
+        // either on closed the app, and opening it again showed neither.
+        // Sheets are windows of their own and take their back presses before
+        // any of this sees one.
+        BackHandler(enabled = ui.searching) { vm.setSearching(false) }
+        BackHandler(enabled = filtered != null && !ui.searching) { vm.filterByAccount(null) }
+
         /** Delete with an undo, because a mis-tap should cost one tap back. */
         fun deleteTransaction(tx: TransactionRow) {
             repo?.delete(tx)
@@ -468,6 +479,13 @@ fun TallyApp(vm: TallyViewModel) {
         // way out of a sheet goes through here — the ✕, the back gesture, a
         // tap on the dimmed page behind — so there is one answer to "what
         // happens to what I had written", not three.
+        //
+        // And the question is asked while the sheet is still on screen. The
+        // bottom sheet's own back and outside-tap handling slides the sheet
+        // away first and only then reports the dismissal, so asking at that
+        // point asked about a sheet that had already gone: "Keep editing"
+        // kept it, invisibly, with no way back to it. Below, a sheet with
+        // unsaved work refuses to be hidden, and the refusal is what asks.
         fun requestClose(index: Int) {
             if (unsaved[index] != true) {
                 popTo(index)
@@ -484,9 +502,28 @@ fun TallyApp(vm: TallyViewModel) {
         // ---- sheets, stacked in the order they were opened ----
         stack.forEachIndexed { index, sheet ->
             key(index) {
-                val state = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+                val holdsUnsaved = unsaved[index] == true
+                // The sheet state keeps the first lambda it is handed for as
+                // long as it lives, so it reaches the question through this.
+                val ask = rememberUpdatedState { requestClose(index) }
+                val state = rememberModalBottomSheetState(
+                    skipPartiallyExpanded = true,
+                    // Hiding is the first thing every dismissal does — a tap
+                    // on the dimmed page, and the back button if anything
+                    // gets past the handler below — and it asks here before
+                    // it moves. Refused, the sheet does not move at all, and
+                    // the question goes up over it.
+                    confirmValueChange = { target ->
+                        val refuse = target == SheetValue.Hidden && unsaved[index] == true
+                        if (refuse) ask.value.invoke()
+                        !refuse
+                    },
+                )
                 ModalBottomSheet(
-                    onDismissRequest = { requestClose(index) },
+                    // Reported once the sheet has slid away, which it only
+                    // does when nothing in it is worth asking about. When it
+                    // is still visible, the refusal above has already asked.
+                    onDismissRequest = { if (!state.isVisible) popTo(index) },
                     sheetState = state,
                     containerColor = c.elevated,
                     contentColor = c.text,
@@ -508,6 +545,12 @@ fun TallyApp(vm: TallyViewModel) {
                     // gesture, because dismissing those costs nothing.
                     sheetGesturesEnabled = !sheet.holdsTypedWork(),
                 ) {
+                    // Back, taken before the sheet's own handler sees it. That
+                    // one is the predictive kind: it starts shrinking the
+                    // sheet as the gesture begins, and a refusal at the end of
+                    // it would leave the sheet shrunk under the question. This
+                    // does nothing to the sheet, and only asks.
+                    BackHandler(enabled = holdsUnsaved) { requestClose(index) }
                     SheetContent(
                         sheet = sheet,
                         vm = vm,
@@ -653,7 +696,9 @@ private fun SheetContent(
                 sheet.onPick(rate)
                 onClose()
             },
-            onClose = onClose,
+            onUnsaved = onUnsaved,
+            // The ✕ and Cancel are someone leaving, and ask first.
+            onClose = onDismiss,
         )
 
         // Deleting asks first, and says what it costs: the transactions
@@ -747,7 +792,8 @@ private fun SheetContent(
                 drop.forEach { repo?.delete(it) }
                 onClose()
             },
-            onClose = onClose,
+            onUnsaved = onUnsaved,
+            onClose = onDismiss,
         )
 
         Sheet.Rates -> RatesSheet(
@@ -756,7 +802,8 @@ private fun SheetContent(
                 vm.writeSettings(ledger.settings.withRates(rates))
                 onClose()
             },
-            onClose = onClose,
+            onUnsaved = onUnsaved,
+            onClose = onDismiss,
         )
 
         Sheet.Settings -> SettingsSheet(

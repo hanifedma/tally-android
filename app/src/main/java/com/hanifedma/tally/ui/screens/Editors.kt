@@ -494,6 +494,7 @@ fun BudgetsSheet(
     ledger: Ledger,
     fmt: Fmt,
     onSave: (List<BudgetRow>, List<BudgetRow>) -> Unit,
+    onUnsaved: (Boolean) -> Unit,
     onClose: () -> Unit,
 ) {
     val main = ledger.ctx.main
@@ -511,6 +512,10 @@ fun BudgetsSheet(
         }
         androidx.compose.runtime.mutableStateMapOf<String, String>().apply { putAll(initial) }
     }
+    // A page of limits is as much typed work as an entry is.
+    val opened = remember { values.toMap() }
+    val unsaved = values.toMap() != opened
+    LaunchedEffect(unsaved) { onUnsaved(unsaved) }
 
     Column(Modifier.fillMaxWidth()) {
         SheetHeader(fmt.t("bud.title"), onClose)
@@ -604,6 +609,7 @@ fun RatesSheet(
     ledger: Ledger,
     fmt: Fmt,
     onSave: (Map<String, Double>) -> Unit,
+    onUnsaved: (Boolean) -> Unit,
     onClose: () -> Unit,
 ) {
     val c = LocalTallyColors.current
@@ -619,6 +625,13 @@ fun RatesSheet(
         }
     }
     var adding by remember { mutableStateOf<String?>(null) }
+
+    // Only rates that say something. A currency added and left blank saves
+    // nothing, so closing on it loses nothing either.
+    fun written() = values.mapValues { it.value.trim() }.filterValues { it.isNotEmpty() }
+    val opened = remember { written() }
+    val unsaved = written() != opened
+    LaunchedEffect(unsaved) { onUnsaved(unsaved) }
 
     Column(Modifier.fillMaxWidth()) {
         SheetHeader(fmt.t("set.rates"), onClose)

@@ -234,13 +234,21 @@ fun EditorSheet(
 
     // Is there anything here that closing would throw away?
     //
-    // Compared field by field against the draft this opened with, so an
-    // entry typed and then rubbed out again counts as nothing, and an
-    // existing transaction reopened and left alone does too. The fields the
-    // editor keeps in step by itself — the currency and rate that follow the
+    // Compared field by field against where this entry started, so an entry
+    // typed and then rubbed out again counts as nothing, and an existing
+    // transaction reopened and left alone does too. The fields the editor
+    // keeps in step by itself — the currency and rate that follow the
     // account — are not in the list: nobody typed those, and including them
     // would make an untouched form claim to be unsaved work.
-    val unsaved = draft.typedFields() != initial.typedFields()
+    //
+    // Where it started moves on "Save & another". Comparing against the
+    // draft the sheet opened with left the blank form after a save still
+    // "different" — its time had moved on, and often its category — so the
+    // answer stayed true, the effect below never ran again, and the flag the
+    // save had just cleared stayed clear. The next entry typed into it could
+    // then be closed without a question.
+    var startedAs by remember { mutableStateOf(initial.typedFields()) }
+    val unsaved = draft.typedFields() != startedAs
     LaunchedEffect(unsaved) { onUnsaved(unsaved) }
 
     /**
@@ -298,6 +306,8 @@ fun EditorSheet(
             feeTouched = false
             amountField = TextFieldValue("")
             noteField = TextFieldValue("")
+            // Filed, so the blank form is the new starting point.
+            startedAs = draft.typedFields()
         }
     }
 
