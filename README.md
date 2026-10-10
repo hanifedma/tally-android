@@ -84,7 +84,7 @@ Supabase project and one Google OAuth client serve both apps.
 ```bash
 ./gradlew assembleRelease     # app/build/outputs/apk/release/app-release.apk
 ./gradlew installDebug        # onto a connected device or emulator
-./gradlew test                # 56 unit tests, no device needed
+./gradlew test                # 82 unit tests, no device needed
 ./gradlew connectedAndroidTest  # the screen tests; needs a device
 ./tools/screenshots.sh        # docs/screenshots/; needs a device
 ```

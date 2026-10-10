@@ -9,45 +9,74 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Keyboard
+import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TimeInput
 import androidx.compose.material3.TimePicker
+import androidx.compose.material3.TimePickerDefaults
+import androidx.compose.material3.TimePickerLayoutType
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpSize
+import androidx.compose.ui.unit.coerceAtLeast
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.hanifedma.tally.core.COLORS
 import com.hanifedma.tally.core.Dates
 import com.hanifedma.tally.core.Ledger
@@ -206,6 +235,41 @@ private val DIALOG_WIDTH = 360.dp
 private val PICKER_HEIGHT = 568.dp
 private val BUTTONS_HEIGHT = 72.dp
 
+/**
+ * The room a dialog can really have: the window, less what the system keeps
+ * of it for its own bars and for the hole the camera looks through.
+ *
+ * `Configuration.screenHeightDp` used to be this number and, for an app
+ * built for Android 15 or later, no longer is: it now counts the status bar
+ * and the navigation bar as room, which is up to 72dp of it that a dialog
+ * cannot use. On a 640dp phone that was the whole difference between a
+ * calendar that fits and one that does not, and a picker told it fits does
+ * not scroll and does not shrink — see what it does instead, below.
+ *
+ * So the window is measured and the bars taken off it. The old number is
+ * still consulted and the smaller of the two believed, since each is only
+ * ever wrong by being too generous — the configuration on a new phone, the
+ * window on a very old one sharing its screen with another app.
+ */
+@Composable
+private fun dialogRoom(): DpSize {
+    val configuration = LocalConfiguration.current
+    val window = LocalWindowInfo.current.containerSize
+    val kept = WindowInsets.systemBars.union(WindowInsets.displayCutout)
+    val direction = LocalLayoutDirection.current
+    return with(LocalDensity.current) {
+        var width = configuration.screenWidthDp.dp
+        var height = configuration.screenHeightDp.dp
+        if (window.width > 0 && window.height > 0) {
+            val across = window.width - kept.getLeft(this, direction) - kept.getRight(this, direction)
+            val down = window.height - kept.getTop(this) - kept.getBottom(this)
+            width = minOf(width, across.toDp())
+            height = minOf(height, down.toDp())
+        }
+        DpSize(width.coerceAtLeast(0.dp), height.coerceAtLeast(0.dp))
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DatePickerSheet(initial: String, fmt: Fmt, onPick: (String) -> Unit, onDismiss: () -> Unit) {
@@ -235,8 +299,8 @@ fun DatePickerSheet(initial: String, fmt: Fmt, onPick: (String) -> Unit, onDismi
     // look.
     //
     // Width only, because height needs the other half of the answer below.
-    val window = LocalConfiguration.current
-    val fit = minOf(1f, (window.screenWidthDp.dp - 16.dp) / DIALOG_WIDTH)
+    val window = dialogRoom()
+    val fit = minOf(1f, (window.width - 16.dp) / DIALOG_WIDTH)
 
     // Landscape, where there is nothing like 568dp of window to put a
     // calendar in. Left alone the picker does not shrink and does not
@@ -251,7 +315,7 @@ fun DatePickerSheet(initial: String, fmt: Fmt, onPick: (String) -> Unit, onDismi
     // generous, but every date is reachable and nothing is drawn over
     // anything else — and the two commonest answers, today and yesterday,
     // are buttons in the editor behind this and never need it at all.
-    val room = window.screenHeightDp.dp
+    val room = window.height
     val scrolls = room < PICKER_HEIGHT + BUTTONS_HEIGHT
     DatePickerDialog(
         modifier = if (fit < 1f) {
@@ -298,26 +362,227 @@ fun DatePickerSheet(initial: String, fmt: Fmt, onPick: (String) -> Unit, onDismi
     }
 }
 
+/** What a dialog leaves between itself and the edge of the window. */
+private val DIALOG_EDGE = 16.dp
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TimePickerSheet(initialMinutes: Int, fmt: Fmt, onPick: (Int) -> Unit, onDismiss: () -> Unit) {
+    val c = LocalTallyColors.current
+    val start = initialMinutes.coerceIn(0, 24 * 60 - 1)
     val state = rememberTimePickerState(
-        initialHour = initialMinutes / 60,
-        initialMinute = initialMinutes % 60,
-        is24Hour = fmt.lang == "ko",
+        initialHour = start / 60,
+        initialMinute = start % 60,
+        // Counted the way the field behind this writes it — see Fmt.uses24Hour.
+        // This used to follow the language: twelve hours in English, twenty-
+        // four in Korean. The field follows the phone's own setting, so on a
+        // phone set to 24 hours an English picker offered AM and PM for a
+        // time shown as 22:41, and a Korean one did the reverse.
+        is24Hour = fmt.uses24Hour,
     )
-    AlertDialog(
+
+    // Not an AlertDialog. That is as wide as the platform says a dialog is —
+    // 360dp of content on a large tablet, less on a phone — and has no way
+    // to be told that what is inside it is wider. See ClockFit for what that
+    // did to the clock. A plain Dialog takes the size of what is put in it,
+    // so here the picker decides and the dialog follows.
+    val room = dialogRoom().let {
+        DpSize(
+            (it.width - DIALOG_EDGE * 2).coerceAtLeast(0.dp),
+            (it.height - DIALOG_EDGE * 2).coerceAtLeast(0.dp),
+        )
+    }
+    val clock = ClockFit.choose(room.width.value, room.height.value, state.is24hour)
+
+    // Typed rather than turned: because that was asked for, or because this
+    // window has no room for a clock worth turning. Only the first is a
+    // choice, so only then is there a button to take it back.
+    var asked by rememberSaveable { mutableStateOf(false) }
+    val typed = asked || clock == null
+    val sideways = clock?.takeIf { !typed && it.shape == ClockFit.Shape.Wide }
+
+    // The dial and the boxes the time sits in are, by default, the same grey
+    // as the dialog they are drawn on, which leaves a ring of numbers floating
+    // on nothing. And the selected half of AM/PM comes out pink, because it
+    // is painted in a tertiary colour this app has never set. So every colour
+    // here is Tally's own, and none is left to a default.
+    val colors = TimePickerDefaults.colors(
+        clockDialColor = c.bg,
+        clockDialSelectedContentColor = c.accentContrast,
+        clockDialUnselectedContentColor = c.text,
+        selectorColor = c.accent,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        periodSelectorBorderColor = c.borderStrong,
+        periodSelectorSelectedContainerColor = c.accentSoft,
+        periodSelectorUnselectedContainerColor = Color.Transparent,
+        periodSelectorSelectedContentColor = c.accent,
+        periodSelectorUnselectedContentColor = c.muted,
+        timeSelectorSelectedContainerColor = c.accentSoft,
+        timeSelectorUnselectedContainerColor = c.bg,
+        timeSelectorSelectedContentColor = c.accent,
+        timeSelectorUnselectedContentColor = c.text,
+    )
+
+    Dialog(
         onDismissRequest = onDismiss,
-        confirmButton = {
-            TextButton(onClick = { onPick(state.hour * 60 + state.minute) }) { Text(fmt.t("done")) }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(fmt.t("cancel")) } },
-        text = {
-            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                TimePicker(state = state)
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        FitInside(room.width, room.height) {
+            Surface(
+                shape = RoundedCornerShape(28.dp),
+                // The same surface as the calendar this opens beside.
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                contentColor = c.text,
+            ) {
+                PickerFrame(
+                    sideways = sideways != null,
+                    picker = {
+                        when {
+                            typed -> TimeInput(state = state, colors = colors)
+                            sideways != null -> TimePicker(
+                                state = state,
+                                // Its dial is as big as the height it is
+                                // offered allows, and this is how it is told
+                                // which of the three fits.
+                                modifier = Modifier.heightIn(max = sideways.offer.dp),
+                                colors = colors,
+                                layoutType = TimePickerLayoutType.Horizontal,
+                            )
+                            else -> TimePicker(
+                                state = state,
+                                colors = colors,
+                                layoutType = TimePickerLayoutType.Vertical,
+                            )
+                        }
+                    },
+                    buttons = {
+                        if (clock != null) {
+                            CompositionLocalProvider(LocalContentColor provides c.muted) {
+                                TypeOrTurn(
+                                    typed = typed,
+                                    onToggle = { asked = !asked },
+                                    // The button is 48dp for the finger and
+                                    // its picture 24dp for the eye. Moved out
+                                    // by the difference, the picture lines up
+                                    // with the edge of the clock above it.
+                                    modifier = Modifier.offset(x = (-12).dp),
+                                )
+                            }
+                        }
+                        Spacer(Modifier.weight(1f))
+                        TextButton(onClick = onDismiss) { Text(fmt.t("cancel")) }
+                        TextButton(onClick = { onPick(state.hour * 60 + state.minute) }) {
+                            Text(fmt.t("done"))
+                        }
+                    },
+                )
             }
-        },
-    )
+        }
+    }
+}
+
+/**
+ * Swaps the clock for two boxes to type in, and back again.
+ *
+ * Material has this button ready-made, and it is not used, because it
+ * introduces itself backwards: showing a keyboard, it tells a screen reader
+ * "switch to clock mode", and showing a clock it says "switch to text
+ * input". The pictures are right and the words are the wrong way round —
+ * which nobody looking at it would ever find, and somebody listening to it
+ * could not get past. The words are still Material's own, so that they are
+ * in the same language as every other label in its picker; they are just
+ * attached to the right picture.
+ */
+@Composable
+private fun TypeOrTurn(typed: Boolean, onToggle: () -> Unit, modifier: Modifier = Modifier) {
+    IconButton(onClick = onToggle, modifier = modifier) {
+        Icon(
+            imageVector = if (typed) Icons.Outlined.Schedule else Icons.Outlined.Keyboard,
+            contentDescription = stringResource(
+                if (typed) {
+                    androidx.compose.material3.R.string.m3c_time_picker_toggle_touch
+                } else {
+                    androidx.compose.material3.R.string.m3c_time_picker_toggle_keyboard
+                }
+            ),
+        )
+    }
+}
+
+/**
+ * A picker, and a row of buttons under it exactly as wide.
+ *
+ * A layout of its own because nothing off the shelf does the one thing
+ * wanted: let the picker be whatever size it is, and only then size the row
+ * to match. A Column would need to be told a width, and the only width
+ * anyone could tell it is a number copied out of the picker's source.
+ *
+ * @param sideways the clock with the time beside it, which is for a window
+ *   short of height and so is given less room above and below.
+ */
+@Composable
+private fun PickerFrame(
+    sideways: Boolean,
+    picker: @Composable () -> Unit,
+    buttons: @Composable RowScope.() -> Unit,
+) {
+    Layout(
+        contents = listOf(
+            { Box { picker() } },
+            { Row(verticalAlignment = Alignment.CenterVertically, content = buttons) },
+        ),
+    ) { (pickers, rows), _ ->
+        val side = ClockFit.SIDE.dp.roundToPx()
+        val head = (if (sideways) ClockFit.WIDE_HEAD else ClockFit.TALL_HEAD).dp.roundToPx()
+        // The upright clock and the typed fields both end in room of their
+        // own; the sideways clock ends at the bottom of its dial.
+        val gap = (if (sideways) ClockFit.WIDE_GAP else 0).dp.roundToPx()
+        val tail = (if (sideways) ClockFit.WIDE_TAIL else ClockFit.TALL_TAIL).dp.roundToPx()
+
+        val body = pickers.first().measure(Constraints())
+        // As wide as the picker — or as the buttons, should they ever need
+        // more: two words at the largest text size beside the narrow,
+        // 24-hour fields is the one case where they do.
+        val row = rows.first()
+        val width = maxOf(body.width, row.maxIntrinsicWidth(Constraints.Infinity))
+        val foot = row.measure(Constraints.fixedWidth(width))
+
+        layout(width + side * 2, head + body.height + gap + foot.height + tail) {
+            body.place(side + (width - body.width) / 2, head)
+            foot.place(side, head + body.height + gap)
+        }
+    }
+}
+
+/**
+ * Draws [content] at the size it wants, or as much smaller as it takes to
+ * fit in [width] by [height].
+ *
+ * The last line of defence, and on most screens it does nothing at all. The
+ * pickers are fixed sizes that do not reflow, so on a window smaller than
+ * one of them — a small phone, a large display-size setting, a pop-up window
+ * dragged down to a corner — the choice is between drawing the whole thing a
+ * little smaller and drawing most of it at full size with the rest cut off.
+ * Compose maps touches through the transform, so everything stays where it
+ * looks.
+ */
+@Composable
+private fun FitInside(width: Dp, height: Dp, content: @Composable () -> Unit) {
+    Layout(content) { measurables, constraints ->
+        val body = measurables.first().measure(Constraints())
+        val widest = minOf(width.roundToPx(), constraints.maxWidth).coerceAtLeast(0)
+        val tallest = minOf(height.roundToPx(), constraints.maxHeight).coerceAtLeast(0)
+        val scale = if (body.width == 0 || body.height == 0) 1f else {
+            minOf(1f, widest.toFloat() / body.width, tallest.toFloat() / body.height)
+        }
+        layout((body.width * scale).toInt(), (body.height * scale).toInt()) {
+            if (scale == 1f) body.place(0, 0) else body.placeWithLayer(0, 0) {
+                scaleX = scale
+                scaleY = scale
+                transformOrigin = TransformOrigin(0f, 0f)
+            }
+        }
+    }
 }
 
 // ------------------------------------------------------------

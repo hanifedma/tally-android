@@ -22,12 +22,16 @@ class MainActivity : ComponentActivity() {
         val splash = installSplashScreen()
         var ready = false
         splash.setKeepOnScreenCondition { !ready }
+
+        super.onCreate(savedInstanceState)
+        // After super.onCreate, not before. The view model keeps what was
+        // being looked at in the activity's saved state, and until that line
+        // has run there is no saved state to hand it: asking for the view
+        // model any earlier is not an early start, it is a crash.
         lifecycleScope.launch {
             vm.ui.first { !it.booting }
             ready = true
         }
-
-        super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent { TallyApp(vm) }
     }

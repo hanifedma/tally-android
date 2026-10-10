@@ -14,14 +14,17 @@ import com.hanifedma.tally.core.SettingsRow
 import com.hanifedma.tally.core.TransactionRow
 import com.hanifedma.tally.core.starterRename
 import com.hanifedma.tally.core.startersMayFollow
+import io.github.jan.supabase.auth.exception.SessionRequiredException
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.query.Order
 import io.github.jan.supabase.postgrest.query.filter.FilterOperator
 import io.github.jan.supabase.realtime.PostgresAction
+import io.github.jan.supabase.realtime.Realtime
 import io.github.jan.supabase.realtime.RealtimeChannel
 import io.github.jan.supabase.realtime.channel
 import io.github.jan.supabase.realtime.postgresChangeFlow
 import io.github.jan.supabase.realtime.realtime
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -33,6 +36,7 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonArray
@@ -362,10 +366,31 @@ class LedgerRepository(
     private val writeLock = Mutex()
     private var channel: RealtimeChannel? = null
     private var realtimeJob: Job? = null
+
+    /** The last channel saying goodbye; see [subscribe] for why it is waited for. */
+    private var leaving: Job? = null
+
+    /** Looking in on a channel that is down; see [watch]. */
+    private var mending: Job? = null
+
+    /** One join at a time, of the ones this makes itself; see [join]. */
+    private val joining = Mutex()
     private var retryJob: Job? = null
     private var retryDelayMs = 2_000L
     private var closed = false
     private var seeding = false
+
+    /**
+     * True while there is nobody to be: no session the server would accept.
+     *
+     * Not the same thing as closed, and the difference is the point. The
+     * library puts its session down whenever the app leaves the screen, and a
+     * session can run out with no network to renew it over; in neither case
+     * has anyone signed out. So the ledger stays exactly where it is — every
+     * row, every queued edit, everything on screen — and only the talking
+     * stops. See [pause] and [resume].
+     */
+    private var paused = false
 
     // ------------------------------------------------------------
     //  Publishing
@@ -397,7 +422,12 @@ class LedgerRepository(
     //  Starting up
     // ------------------------------------------------------------
 
-    fun start() {
+    /**
+     * @param paused open on what this device already holds and say nothing
+     *   to the server yet — for a ledger shown before it is known whether
+     *   the session is still good. [resume] starts the conversation.
+     */
+    fun start(paused: Boolean = false) {
         loadCache()
         publish()
         if (local) {
@@ -409,6 +439,10 @@ class LedgerRepository(
             return
         }
         setStatus(Status.SYNCING)
+        if (paused) {
+            this.paused = true
+            return
+        }
         scope.launch {
             try {
                 syncNow()
@@ -438,6 +472,11 @@ class LedgerRepository(
     }
 
     private fun saveCache() {
+        // A fetch or a send that was already on its way when this was closed
+        // still comes back, and still tries to write down what it learned.
+        // After a sign-out that would put the ledger back on a phone that had
+        // just been told to forget it.
+        if (closed) return
         store.writeCache(
             LocalStore.Cache(
                 cursors = tables.associate { it.name to it.cursor },
@@ -451,7 +490,7 @@ class LedgerRepository(
     }
 
     private fun saveOutbox() {
-        if (local) return
+        if (local || closed) return
         store.writeOutbox(
             LocalStore.Outbox(
                 accounts = accounts.pending.values.toList(),
@@ -475,7 +514,7 @@ class LedgerRepository(
     // ------------------------------------------------------------
 
     private suspend fun syncNow() {
-        if (closed || local) return
+        if (closed || local || paused) return
         setStatus(Status.SYNCING)
         var changed = false
 
@@ -511,17 +550,27 @@ class LedgerRepository(
 
     /** Called on resume, and after a reconnection. */
     fun refresh() {
-        if (closed || local) return
+        if (closed || local || paused) return
         // Coming back to the app is the moment to find out whether the socket
         // survived. Fetching alone would leave the screen correct once and
-        // then frozen — the catch-up has to be paired with putting the
-        // channel back, or "live" means "live as of when you opened it".
+        // then frozen — the catch-up has to be paired with the channel being
+        // back, or "live" means "live as of when you opened it".
+        //
+        // Being back, though, is the library's job and has to be left to it.
+        // A channel found dropped here used to be thrown away and replaced on
+        // the spot, which looked like the cure and was the disease: Android
+        // takes the socket from an app it has put to sleep, the library is
+        // already on its way to a new one, and when it gets there it rejoins
+        // every channel it knows about — including the replacement, which
+        // was at that moment joining itself. See [join] for what a channel
+        // joined twice turns into; what it looked like was an app saying
+        // "Offline" on a perfectly good network, a few seconds after being
+        // come back to. So a dropped channel is watched rather than replaced.
         val ch = channel
         if (ch == null) {
             subscribe()
         } else if (ch.status.value == RealtimeChannel.Status.UNSUBSCRIBED) {
-            unsubscribe()
-            subscribe()
+            watch(ch)
         }
         scope.launch {
             try {
@@ -538,7 +587,23 @@ class LedgerRepository(
     // ------------------------------------------------------------
 
     private fun subscribe() {
-        if (closed || local || channel != null) return
+        if (closed || local || paused || channel != null) return
+        // Not until the channel before this one has finished leaving.
+        //
+        // The library files a channel under its name, and every channel this
+        // makes has the same one. Asked for a channel while the last is still
+        // on its way out, it hands back the last — and then, when that one's
+        // goodbye completes, takes the name off its books. What is left is a
+        // channel that has joined and that nothing is delivered to: the app
+        // says it is live and hears nothing.
+        val goodbye = leaving
+        if (goodbye?.isActive == true) {
+            scope.launch {
+                goodbye.join()
+                subscribe()
+            }
+            return
+        }
         val ch = client.channel("tally:$uid")
         channel = ch
 
@@ -593,19 +658,106 @@ class LedgerRepository(
                         // everything is live while nothing is arriving. Only
                         // after a first join — a channel starts unsubscribed,
                         // and "offline" before the first connection would be
-                        // a flash of the wrong word on every launch.
-                        RealtimeChannel.Status.UNSUBSCRIBED ->
-                            if (joinedOnce) setStatus(Status.OFFLINE)
+                        // a flash of the wrong word on every launch. And not
+                        // while paused, which is mostly an app nobody is
+                        // looking at: the word would be read by no one until
+                        // they came back, to a network that was fine.
+                        RealtimeChannel.Status.UNSUBSCRIBED -> {
+                            if (joinedOnce && !paused) setStatus(Status.OFFLINE)
+                            watch(ch)
+                        }
                         else -> Unit
                     }
                 }
             }
-            try {
-                ch.subscribe(blockUntilSubscribed = true)
-            } catch (e: Exception) {
-                Log.w(TAG, "Realtime subscribe failed", e)
-                setStatus(Status.OFFLINE)
-                scheduleRetry()
+            join(ch)
+        }
+    }
+
+    /**
+     * Join [ch], once, and only if nobody else is about to.
+     *
+     * "Once" is the whole difficulty, because this is not the only thing that
+     * joins it. The library keeps a list of channels and, whenever it gets a
+     * connection back, joins every one on it — which is exactly right, and
+     * means that a join asked for here while it was reconnecting arrives
+     * twice. A channel joined twice does not fail, which would be kinder. The
+     * server closes the first join in favour of the second and says so; the
+     * library hears "closed" and drops the channel, both joins and all, off
+     * its list — but the second join is still there at the far end, with
+     * nobody listening to it. The next channel of that name to join is told
+     * that *that* one has now been closed in its favour, and is dropped in
+     * its turn: closed, the moment it joins, by the ghost of the one before.
+     *
+     * Asking the library to join while it has no connection is precisely the
+     * request that turns into two: it waits for the connection, and so does
+     * the rejoin. So the connection is asked for first and by itself — which
+     * waits its turn behind any reconnection already under way — and the
+     * join is sent only once things have stopped moving, and only if the
+     * channel is still not joined by then. If there is no connection to be
+     * had, nothing is sent at all: the library goes on trying, and when it
+     * gets one, joins this channel along with the rest of its list.
+     */
+    private suspend fun join(ch: RealtimeChannel) = joining.withLock {
+        if (closed || paused || channel !== ch) return@withLock
+        try {
+            val realtime = client.realtime
+            if (realtime.status.value != Realtime.Status.CONNECTED) realtime.connect()
+            // A rejoin the library began as that returned has not said so yet.
+            delay(SETTLE_MS)
+            if (closed || paused || channel !== ch) return@withLock
+            if (realtime.status.value != Realtime.Status.CONNECTED) return@withLock
+            if (ch.status.value != RealtimeChannel.Status.UNSUBSCRIBED) return@withLock
+            ch.subscribe()
+        } catch (e: CancellationException) {
+            // Told to stop, which is what putting a channel down looks like
+            // from in here. Not a failure — though it used to be caught as
+            // one, and set "Offline" and booked a retry every time a channel
+            // was put down while it was still joining.
+            throw e
+        } catch (e: Exception) {
+            // Nothing more to do about it here: the channel is still down,
+            // and a channel that is down is being watched.
+            Log.w(TAG, "Couldn't join the channel", e)
+        }
+    }
+
+    /**
+     * Look in on a channel that is down, for as long as it stays down.
+     *
+     * Almost always there is nothing to do. The library reconnects by itself,
+     * however long that takes, and joins every channel on its list when it
+     * does; anything done here in the meantime only gets in its way — see
+     * [join]. But there are two ways for a channel to be down that nothing
+     * will ever put right, and both of them leave the app looking live and
+     * hearing nothing for as long as it stays open:
+     *
+     *   • the far end closed it, and the library has struck it off its list.
+     *     Nothing rejoins what is not on the list, so it gets a new channel;
+     *   • it is still on the list, but the library has stopped trying to
+     *     connect — after dropping an idle socket, which it does on purpose,
+     *     or after losing count of its own reconnection, which it does not.
+     *     It gets a join, which asks for a connection first.
+     *
+     * Neither is distinguishable from "about to come back" at the moment the
+     * channel drops, so each look is taken after the library has had time to
+     * reconnect and rejoin by itself, and found the channel still down.
+     */
+    private fun watch(ch: RealtimeChannel) {
+        if (closed || local || mending?.isActive == true) return
+        mending = scope.launch {
+            while (true) {
+                delay(REJOIN_GRACE_MS)
+                // Paused, there is nobody to join as. Resuming looks again.
+                if (closed || paused || channel !== ch) return@launch
+                if (ch.status.value != RealtimeChannel.Status.UNSUBSCRIBED) return@launch
+                if (client.realtime.subscriptions[ch.topic] !== ch) {
+                    Log.w(TAG, "The channel was closed from the far end; making another")
+                    unsubscribe()
+                    subscribe()
+                    return@launch
+                }
+                join(ch)
             }
         }
     }
@@ -613,11 +765,19 @@ class LedgerRepository(
     private fun unsubscribe() {
         realtimeJob?.cancel()
         realtimeJob = null
+        mending?.cancel()
         val ch = channel ?: return
         channel = null
-        scope.launch {
+        // Already struck off the library's list, by the far end closing it:
+        // there is nothing left to remove, and asking anyway starts a second
+        // countdown to dropping the socket that nothing ever cancels.
+        if (client.realtime.subscriptions[ch.topic] !== ch) return
+        leaving = scope.launch {
             try {
-                client.realtime.removeChannel(ch)
+                // Bounded, because the next channel waits for this to end and
+                // a goodbye is said over the network: on a connection that
+                // has gone quiet without closing, it could take for ever.
+                withTimeoutOrNull(GOODBYE_MS) { client.realtime.removeChannel(ch) }
             } catch (e: Exception) {
                 Log.w(TAG, "Couldn't remove the channel", e)
             }
@@ -625,15 +785,17 @@ class LedgerRepository(
     }
 
     private fun scheduleRetry() {
-        if (closed || local || retryJob?.isActive == true) return
+        if (closed || local || paused || retryJob?.isActive == true) return
         val wait = retryDelayMs
         // Back off, but never so far that a reconnection feels like a hang.
         retryDelayMs = (retryDelayMs * 2).coerceAtMost(30_000L)
         retryJob = scope.launch {
             delay(wait)
             if (closed) return@launch
-            unsubscribe()
-            subscribe()
+            // A channel only if there is none. One that exists is either
+            // joined or being rejoined by the library, and replacing it here
+            // is how it came to be joined twice.
+            if (channel == null) subscribe()
             try {
                 flushNow()
                 syncNow()
@@ -645,6 +807,8 @@ class LedgerRepository(
 
     private fun reportSyncFailure(e: Exception) {
         Log.w(TAG, "Sync failed", e)
+        // Paused is its own explanation, and being resumed is its own retry.
+        if (paused) return
         setStatus(Status.ERROR)
         scheduleRetry()
     }
@@ -658,6 +822,10 @@ class LedgerRepository(
      * same list, for the same reason, in store.js.
      */
     private fun isSetupProblem(e: Exception): Boolean {
+        // Asked while the session was down. Nothing is wrong with the
+        // database, and its message carries a URL that the patterns below
+        // were never meant to be read against.
+        if (e is SessionRequiredException) return false
         val m = e.message.orEmpty()
         return m.contains("permission denied", ignoreCase = true) ||
             m.contains("42501") || m.contains("42P01") || m.contains("42703") ||
@@ -667,6 +835,8 @@ class LedgerRepository(
 
     /** True for the kind of failure worth trying again later. */
     private fun isTransient(e: Exception): Boolean {
+        // Not sent at all, so certainly not refused.
+        if (e is SessionRequiredException) return true
         val message = e.message.orEmpty()
         // Keeps its place in the queue, however long that takes.
         if (isSetupProblem(e)) return true
@@ -773,12 +943,14 @@ class LedgerRepository(
     fun restore(row: TransactionRow) = put(row.copy(deletedAt = null))
 
     fun flush() {
-        if (closed || local) return
+        // Paused, an edit waits in the outbox like any other made with no
+        // signal, and goes when the session is back.
+        if (closed || local || paused) return
         scope.launch { flushNow() }
     }
 
     private suspend fun flushNow() = writeLock.withLock {
-        if (closed) return@withLock
+        if (closed || paused) return@withLock
         if (pendingCount() == 0) {
             setStatus(Status.LIVE)
             return@withLock
@@ -794,6 +966,9 @@ class LedgerRepository(
             retryDelayMs = 2_000L
         } catch (e: Exception) {
             Log.w(TAG, "Couldn't send changes yet", e)
+            // Paused while this was on its way. Whatever did not arrive is
+            // still queued, and resuming sends it.
+            if (paused) return@withLock
             // "Reconnecting…" is honest but useless when the connection is
             // fine and the database is the problem. Say what it actually is,
             // once — repeating it on every retry would be its own kind of
@@ -1031,16 +1206,66 @@ class LedgerRepository(
     //  Lifecycle
     // ------------------------------------------------------------
 
+    /**
+     * Stop talking to the server, and keep everything else.
+     *
+     * For when there is no session to talk with — see [paused]. Nothing is
+     * closed and nothing is forgotten: the rows stay, the screen stays, and
+     * an edit made in the meantime is queued the way one made with no signal
+     * is. Asking twice is harmless.
+     *
+     * @param unreachable the session has run out and could not be renewed,
+     *   which is worth saying on screen. Merely leaving the app is not: the
+     *   status would be read by nobody, and would still be showing "offline"
+     *   for the first moment after coming back to a perfectly good network.
+     */
+    fun pause(unreachable: Boolean = false) {
+        if (closed || local) return
+        if (!paused) {
+            paused = true
+            retryJob?.cancel()
+            // The channel is left as it is. The library keeps it, rejoins it
+            // when it can, and hands it the new token when there is one —
+            // none of which wants help; see [refresh].
+        }
+        if (unreachable) setStatus(Status.OFFLINE)
+    }
+
+    /**
+     * There is a session again: fetch what was missed, send what was queued,
+     * and open the channel if this ledger has not had one yet. Does nothing
+     * to a ledger that was not paused.
+     */
+    fun resume() {
+        if (closed || local || !paused) return
+        paused = false
+        refresh()
+    }
+
     fun close() {
-        closed = true
+        if (closed) return
         retryJob?.cancel()
         unsubscribe()
         saveCache()
         saveOutbox()
+        // Last, because the two saves above are the last ones allowed.
+        closed = true
     }
 
-    /** Sign-out: a shared phone should not keep the ledger. */
-    fun forgetDevice() = store.forget()
+    /**
+     * Sign-out, or starting a device-only ledger over: nothing of it stays on
+     * this device.
+     *
+     * Closes first, and for good. This used to delete the two files and leave
+     * the closing to its caller — and closing saves, so the ledger was written
+     * straight back a line after it had been erased. Signing out left it on
+     * the phone, and "Start over" on a device-only ledger started nothing
+     * over at all: it reopened the file it had just been told to delete.
+     */
+    fun forgetDevice() {
+        close()
+        store.forget()
+    }
 
     companion object {
         /** The user id a device-only ledger is filed under, here and on the web. */
@@ -1048,5 +1273,24 @@ class LedgerRepository(
 
         private const val TAG = "TallyLedger"
         private const val PAGE = 1000L
+
+        /** How long a channel is given to say goodbye before the next one stops waiting. */
+        private const val GOODBYE_MS = 5_000L
+
+        /**
+         * How long a channel that is down is left alone before being looked
+         * in on. The library waits seven seconds before each attempt to
+         * reconnect, and rejoins as soon as one succeeds; this is long enough
+         * for that to have happened if it was going to.
+         */
+        private const val REJOIN_GRACE_MS = 12_000L
+
+        /**
+         * How long after a connection is made a join is held back. A rejoin
+         * the library has just begun shows on the channel within a few
+         * milliseconds; a second is a wide margin on that, and nothing is
+         * waiting on the first realtime event to arrive a second sooner.
+         */
+        private const val SETTLE_MS = 1_000L
     }
 }

@@ -50,7 +50,23 @@ object Supabase {
                 alwaysAutoRefresh = true
                 autoLoadFromStorage = true
             }
-            install(Postgrest)
+            install(Postgrest) {
+                // No session, no request. Left at its default the library
+                // sends the request anyway, signed with the anon key — and
+                // row level security does not refuse that, it answers it:
+                // as nobody, with no rows. An empty answer is one the sync
+                // layer believes. It is how a first fetch concludes that the
+                // server has never heard of this ledger and sends the whole
+                // of it again, or that the account is new and needs its
+                // starting categories written over the ones already there.
+                //
+                // The library is without a session more often than it
+                // sounds: it puts the session down every time the app leaves
+                // the screen and picks it up again on the way back. Asked in
+                // between, this now throws, which the repository already
+                // knows how to hear — as "not now", to be tried again.
+                requireValidSession = true
+            }
             install(Realtime)
             defaultSerializer = io.github.jan.supabase.serializer.KotlinXSerializer(json)
             httpEngine = OkHttp.create()

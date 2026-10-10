@@ -271,13 +271,14 @@ fun TallyApp(vm: TallyViewModel) {
 
         // The ledger as it is being looked at: one account, or all of them.
         //
-        // An account deleted on another device while its filter was on would
-        // otherwise leave the log looking empty for no visible reason, so a
-        // filter that no longer names anything is dropped.
+        // A filter that names no account is simply not one: everything below
+        // reads `filtered`, never the id, so the log shows every account and
+        // nothing on screen claims otherwise. Forgetting the id itself is the
+        // view model's job, done when it sees the account go — see
+        // TallyViewModel.show. Done here, by noticing an id with no account,
+        // it also fired for a ledger that had not finished loading, which is
+        // the one moment a remembered filter is being put back.
         val filtered = ui.accountFilter?.let { ledger.account(it) }
-        LaunchedEffect(ui.accountFilter, filtered) {
-            if (ui.accountFilter != null && filtered == null) vm.filterByAccount(null)
-        }
         val visible = remember(ledger.transactions, filtered?.id) {
             Compute.forAccount(ledger.transactions, filtered?.id)
         }

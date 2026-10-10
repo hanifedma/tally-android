@@ -36,24 +36,73 @@ class AuthManager {
 
     data class Account(val id: String, val email: String?, val avatarUrl: String?, val name: String?)
 
+    /**
+     * What is known about who is signed in.
+     *
+     * Four answers, because "signed in" and "signed out" are not the only
+     * two. The library also says "I am still reading the session back" and
+     * "I have a session but could not renew it", and it does not only say
+     * the first of those at startup: once it has hooked itself to the app
+     * going in and out of view, it puts the session down every time the app
+     * leaves the screen and reads it back when the app returns.
+     *
+     * Folding both into "signed out" — which this did, as `Account?` — made
+     * each of those trips a sign-out and a sign-in. The ledger was closed
+     * behind the person's back and built again in front of them: the month
+     * back to this one, the account being looked at forgotten, and whatever
+     * was half typed into a sheet gone with the sheet. Offline it was worse,
+     * since an hour without a network is an hour-old session that cannot be
+     * renewed, and that turned a ledger kept on the device precisely so it
+     * could be read with no signal into a sign-in screen.
+     *
+     * It hid well. The hook goes in at once after signing in, but an app
+     * started with a session already on the device does not get it straight
+     * away — the library is still busy with that session, and stays busy for
+     * a good while. So the app opened, looked at and closed never did this,
+     * and the app left open through an afternoon did it on every trip away.
+     */
+    sealed interface Session {
+        data class SignedIn(val account: Account) : Session
+
+        /** Really signed out: by the person, or by the server refusing the session. */
+        data object SignedOut : Session
+
+        /** Being read back from storage. Not an answer yet, in either direction. */
+        data object Loading : Session
+
+        /**
+         * There is a session, it has run out, and the server could not be
+         * reached to renew it. Still the same person; just not somebody the
+         * server will talk to until it can be.
+         */
+        data object Unreachable : Session
+    }
+
     private val client get() = Supabase.client()
 
     /**
-     * The signed-in account, or null. Emits immediately with whatever was
-     * restored from storage, then on every later change.
+     * Who is signed in, as far as is known. Emits immediately, then on every
+     * later change.
      */
-    fun accounts(): Flow<Account?> = client.auth.sessionStatus.map { status ->
+    fun sessions(): Flow<Session> = client.auth.sessionStatus.map { status ->
         when (status) {
             is SessionStatus.Authenticated -> status.session.user?.let { user ->
                 val meta = user.userMetadata
-                Account(
-                    id = user.id,
-                    email = user.email,
-                    avatarUrl = meta?.get("avatar_url")?.let { stringOrNull(it) },
-                    name = meta?.get("full_name")?.let { stringOrNull(it) },
+                Session.SignedIn(
+                    Account(
+                        id = user.id,
+                        email = user.email,
+                        avatarUrl = meta?.get("avatar_url")?.let { stringOrNull(it) },
+                        name = meta?.get("full_name")?.let { stringOrNull(it) },
+                    )
                 )
-            }
-            else -> null
+            } ?: Session.SignedOut
+            is SessionStatus.NotAuthenticated -> Session.SignedOut
+            is SessionStatus.RefreshFailure -> Session.Unreachable
+            // Initializing — and anything a later version of the library
+            // adds. An unknown state is a reason to wait, never a reason to
+            // throw a ledger away.
+            else -> Session.Loading
         }
     }
 
@@ -165,6 +214,17 @@ class AuthManager {
             client.auth.signOut()
         } catch (e: Exception) {
             Log.w(TAG, "Sign-out call failed; clearing locally anyway", e)
+            // "Anyway" has to be done by hand. The library only forgets the
+            // session once the server has been told, so with no network it
+            // threw from the line above and forgot nothing: the app had put
+            // the ledger away and was still, as far as the library knew,
+            // signed in — an empty screen with no way out of it until the
+            // app was restarted, when it signed straight back in.
+            try {
+                client.auth.clearSession()
+            } catch (e: Exception) {
+                Log.w(TAG, "Couldn't clear the session", e)
+            }
         }
         try {
             // So the next sign-in shows the account chooser instead of

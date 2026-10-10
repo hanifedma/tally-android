@@ -70,6 +70,18 @@ class Fmt(val lang: String, private val mainCurrency: String) {
         )
     }
 
+    /**
+     * Does [time] count the hours to 24, or to 12 twice?
+     *
+     * Asked of the clock itself rather than of the language or the phone,
+     * because what [time] writes is the only answer that matters: a picker
+     * that offers AM and PM under a field reading 22:41 is asking for the
+     * same time in two notations at once. And that answer is not the
+     * language's to give — the pattern behind [time] follows the phone's own
+     * 12/24-hour setting, in English and in Korean alike.
+     */
+    val uses24Hour: Boolean get() = time(13 * 60 + 5).contains("13")
+
     fun percent(ratio: Double): String {
         val nf = java.text.NumberFormat.getPercentInstance(locale)
         nf.maximumFractionDigits = 0
